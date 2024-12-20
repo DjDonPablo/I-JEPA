@@ -48,22 +48,23 @@ class AffectNetDataset(Dataset):
     def get_random_width_and_height(self, n: int):
         """
         Returns a random height and weight based on a random aspect ratio and a random scale.\\
-        If `n` equals 1, it is deduced that the random generation is for context block, so it uses the aspect ratio and scale range specific to the context.\\
-        Else, it is deduced that the random generation is for mask blocks, so it uses the aspect ratio and scale range specific to the masks. 
+        Length of height and width is `n+1`, the first `n` elements being masks height and width, and the last one being the context height and weight.
 
         Parameters:
         - `n`: the number of height and width to be generated. 
         """
-        if n == 1:  # 1 generation => for context
-            aspect_ratio = torch.FloatTensor(n).uniform_(
-                *self.aspect_ratio_range_context
-            )
-            scale = torch.FloatTensor(n).uniform_(*self.scale_range_context)
-        else:
-            aspect_ratio = torch.FloatTensor(n).uniform_(*self.aspect_ratio_range_mask)
-            scale = torch.FloatTensor(n).uniform_(*self.scale_range_mask)
+        aspect_ratio = torch.FloatTensor(n).uniform_(*self.aspect_ratio_range_mask)
+        scale = torch.FloatTensor(n).uniform_(*self.scale_range_mask)
 
-        # calculate area, width and height of each mask
+        aspect_ratio = torch.cat(
+            aspect_ratio,
+            torch.FloatTensor(1).uniform_(*self.aspect_ratio_range_context),
+        )
+        scale = torch.cat(
+            scale, torch.FloatTensor(1).uniform_(*self.scale_range_context)
+        )
+
+        # calculate area, width and height of each mask and context
         area = scale * (self.sqrt_count_patch**2)
         height = torch.sqrt(area / aspect_ratio).round().int()
         width = torch.sqrt(area * aspect_ratio).round().int()
@@ -81,34 +82,31 @@ class AffectNetDataset(Dataset):
         img = pil_to_tensor(Image.open(img_path))  # 96 x 96 x 3
 
         # random height and width for masks
-        height, width = self.get_random_width_and_height(self.nb_mask)
+        heights, widths = self.get_random_width_and_height(self.nb_mask)
+        xs = np.random.randint(low=self.sqrt_count_patch - widths[:-1].int() + 1)
+        ys = np.random.randint(low=self.sqrt_count_patch - heights[:-1].int() + 1)
 
         # calculate patch indexes of mask
         masks = []
         masks_indexes = set()
-        x = np.random.randint(low=self.sqrt_count_patch - width.int() + 1)
-        y = np.random.randint(low=self.sqrt_count_patch - height.int() + 1)
-        for i in range(self.nb_mask):
+        z = zip(xs, ys, heights[:-1], widths[:-1])
+        for x, y, height, width in z:
             tmp_mask = torch.cat(
                 [
-                    torch.arange(x, x + width[i]) + (y + i) * self.sqrt_count_patch
-                    for i in range(height[i])
+                    torch.arange(x, x + width) + (y + i) * self.sqrt_count_patch
+                    for i in range(height)
                 ]
             )
 
             masks_indexes.update(tmp_mask.tolist())
             masks.append(tmp_mask)
 
-        # random height and width for context
-        height, width = self.get_random_width_and_height(1)
-        x = np.random.randint(low=self.sqrt_count_patch - int(width[0].item()) + 1)
-        y = np.random.randint(low=self.sqrt_count_patch - int(height[0].item()) + 1)
-
         context_indexes = set(
             torch.cat(
                 [
-                    torch.arange(x, x + width[i]) + (y + i) * self.sqrt_count_patch
-                    for i in range(height[i])
+                    torch.arange(xs[-1], xs[-1] + widths[-1])
+                    + (ys[-1] + i) * self.sqrt_count_patch
+                    for i in range(heights[-1])
                 ]
             ).tolist()
         )
