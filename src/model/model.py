@@ -49,7 +49,7 @@ class PatchDecoder(nn.Module):
         return x  # => (B,3,p,p)
 
 
-class ContextEncoder(nn.Module):
+class ViTEncoder(nn.Module):
     def __init__(self, embed_dim):
         super().__init__()
         self.context_encoder = VisionTransformer(
@@ -68,25 +68,7 @@ class ContextEncoder(nn.Module):
         return self.context_encoder(x)  # (B, embed_dim) by default
 
 
-class TargetEncoder(nn.Module):
-    def __init__(self, embed_dim):
-        super().__init__()
-        self.encoder = VisionTransformer(
-            image_size=96,
-            patch_size=8,
-            num_layers=12,
-            num_heads=12,
-            hidden_dim=embed_dim,
-            mlp_dim=4 * embed_dim,
-            num_classes=0,
-        )
-        self.encoder.heads = nn.Identity()
-
-    def forward(self, x):
-        return self.encoder(x)  # (B, embed_dim)
-
-
-class Predictor(nn.Module):
+class ViTPredictor(nn.Module):
     def __init__(self, embed_dim):
         super().__init__()
         self.predictor = nn.Sequential(
@@ -105,9 +87,9 @@ class Predictor(nn.Module):
 class IJEPAModel(nn.Module):
     def __init__(self, embed_dim=768, nb_masks=4, patch_size=8):
         super().__init__()
-        self.context_encoder = ContextEncoder(embed_dim)
-        self.target_encoder = TargetEncoder(embed_dim)
-        self.predictor = Predictor(embed_dim)
+        self.context_encoder = ViTEncoder(embed_dim)
+        self.target_encoder = ViTEncoder(embed_dim)
+        self.predictor = ViTPredictor(embed_dim)
         self.decoder = PatchDecoder(embed_dim, patch_size=patch_size)
 
         self.mask_token = nn.Parameter(torch.randn(1, embed_dim))
