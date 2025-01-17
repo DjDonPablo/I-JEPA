@@ -2,7 +2,7 @@ import torch.nn as nn
 import torch
 from torchvision.models import VisionTransformer
 
-from src.utils.utils import image_to_patches, patches_to_image
+from src.utils.utils import image_to_patches, patches_to_image, repeat_interleave_batch
 from src.mask.mask import apply_masks
 
 import numpy as np
@@ -30,22 +30,25 @@ We use the target-encoder for evaluation and average pool its output to produce 
 """
 
 
-def get_2d_sincos_pos_embed(embed_dim, grid_size, cls_token=False):
+def get_1d_sincos_pos_embed_from_grid(embed_dim, pos):
     """
-    grid_size: int of the grid height and width
-    return:
-    pos_embed: [grid_size*grid_size, embed_dim] or [1+grid_size*grid_size, embed_dim] (w/ or w/o cls_token)
+    embed_dim: output dimension for each position
+    pos: a list of positions to be encoded: size (M,)
+    out: (M, D)
     """
-    grid_h = np.arange(grid_size, dtype=float)
-    grid_w = np.arange(grid_size, dtype=float)
-    grid = np.meshgrid(grid_w, grid_h)  # here w goes first
-    grid = np.stack(grid, axis=0)
+    assert embed_dim % 2 == 0
+    omega = np.arange(embed_dim // 2, dtype=float)
+    omega /= embed_dim / 2.
+    omega = 1. / 10000**omega   # (D/2,)
 
-    grid = grid.reshape([2, 1, grid_size, grid_size])
-    pos_embed = get_2d_sincos_pos_embed_from_grid(embed_dim, grid)
-    if cls_token:
-        pos_embed = np.concatenate([np.zeros([1, embed_dim]), pos_embed], axis=0)
-    return pos_embed
+    pos = pos.reshape(-1)   # (M,)
+    out = np.einsum('m,d->md', pos, omega)   # (M, D/2), outer product
+
+    emb_sin = np.sin(out)  # (M, D/2)
+    emb_cos = np.cos(out)  # (M, D/2)
+
+    emb = np.concatenate([emb_sin, emb_cos], axis=1)  # (M, D)
+    return emb
 
 
 def get_2d_sincos_pos_embed_from_grid(embed_dim, grid):
@@ -72,114 +75,22 @@ def get_1d_sincos_pos_embed(embed_dim, grid_size, cls_token=False):
     return pos_embed
 
 
-def get_1d_sincos_pos_embed_from_grid(embed_dim, pos):
+def get_2d_sincos_pos_embed(embed_dim, grid_size, cls_token=False):
     """
-    embed_dim: output dimension for each position
-    pos: a list of positions to be encoded: size (M,)
-    out: (M, D)
+    grid_size: int of the grid height and width
+    return:
+    pos_embed: [grid_size*grid_size, embed_dim] or [1+grid_size*grid_size, embed_dim] (w/ or w/o cls_token)
     """
-    assert embed_dim % 2 == 0
-    omega = np.arange(embed_dim // 2, dtype=float)
-    omega /= embed_dim / 2.
-    omega = 1. / 10000**omega   # (D/2,)
+    grid_h = np.arange(grid_size, dtype=float)
+    grid_w = np.arange(grid_size, dtype=float)
+    grid = np.meshgrid(grid_w, grid_h)  # here w goes first
+    grid = np.stack(grid, axis=0)
 
-    pos = pos.reshape(-1)   # (M,)
-    out = np.einsum('m,d->md', pos, omega)   # (M, D/2), outer product
-
-    emb_sin = np.sin(out)  # (M, D/2)
-    emb_cos = np.cos(out)  # (M, D/2)
-
-    emb = np.concatenate([emb_sin, emb_cos], axis=1)  # (M, D)
-    return emb
-
-
-def drop_path(x, drop_prob: float = 0., training: bool = False):
-    if drop_prob == 0. or not training:
-        return x
-    keep_prob = 1 - drop_prob
-    shape = (x.shape[0],) + (1,) * (x.ndim - 1)  # work with diff dim tensors, not just 2D ConvNets
-    random_tensor = keep_prob + torch.rand(shape, dtype=x.dtype, device=x.device)
-    random_tensor.floor_()  # binarize
-    output = x.div(keep_prob) * random_tensor
-    return output
-
-
-class DropPath(nn.Module):
-    """Drop paths (Stochastic Depth) per sample  (when applied in main path of residual blocks).
-    """
-    def __init__(self, drop_prob=None):
-        super(DropPath, self).__init__()
-        self.drop_prob = drop_prob
-
-    def forward(self, x):
-        return drop_path(x, self.drop_prob, self.training)
-
-
-class MLP(nn.Module):
-    def __init__(self, in_features, hidden_features=None, out_features=None, act_layer=nn.GELU, drop=0.):
-        super().__init__()
-        out_features = out_features or in_features
-        hidden_features = hidden_features or in_features
-        self.fc1 = nn.Linear(in_features, hidden_features)
-        self.act = act_layer()
-        self.fc2 = nn.Linear(hidden_features, out_features)
-        self.drop = nn.Dropout(drop)
-
-    def forward(self, x):
-        x = self.fc1(x)
-        x = self.act(x)
-        x = self.drop(x)
-        x = self.fc2(x)
-        x = self.drop(x)
-        return x
-
-
-class Attention(nn.Module):
-    def __init__(self, dim, num_heads=8, qkv_bias=False, qk_scale=None, attn_drop=0., proj_drop=0.):
-        super().__init__()
-        self.num_heads = num_heads
-        head_dim = dim // num_heads
-        self.scale = qk_scale or head_dim ** -0.5
-
-        self.qkv = nn.Linear(dim, dim * 3, bias=qkv_bias)
-        self.attn_drop = nn.Dropout(attn_drop)
-        self.proj = nn.Linear(dim, dim)
-        self.proj_drop = nn.Dropout(proj_drop)
-
-    def forward(self, x):
-        B, N, C = x.shape
-        qkv = self.qkv(x).reshape(B, N, 3, self.num_heads, C // self.num_heads).permute(2, 0, 3, 1, 4)
-        q, k, v = qkv[0], qkv[1], qkv[2]
-
-        attn = (q @ k.transpose(-2, -1)) * self.scale
-        attn = attn.softmax(dim=-1)
-        attn = self.attn_drop(attn)
-
-        x = (attn @ v).transpose(1, 2).reshape(B, N, C)
-        x = self.proj(x)
-        x = self.proj_drop(x)
-        return x, attn
-
-
-class Block(nn.Module):
-    def __init__(self, dim, num_heads, mlp_ratio=4., qkv_bias=False, qk_scale=None, drop=0., attn_drop=0.,
-                 drop_path=0., act_layer=nn.GELU, norm_layer=nn.LayerNorm):
-        super().__init__()
-        self.norm1 = norm_layer(dim)
-        self.attn = Attention(
-            dim, num_heads=num_heads, qkv_bias=qkv_bias, qk_scale=qk_scale, attn_drop=attn_drop, proj_drop=drop)
-        self.drop_path = DropPath(drop_path) if drop_path > 0. else nn.Identity()
-        self.norm2 = norm_layer(dim)
-        mlp_hidden_dim = int(dim * mlp_ratio)
-        self.mlp = MLP(in_features=dim, hidden_features=mlp_hidden_dim, act_layer=act_layer, drop=drop)
-
-    def forward(self, x, return_attention=False):
-        y, attn = self.attn(self.norm1(x))
-        if return_attention:
-            return attn
-        x = x + self.drop_path(y)
-        x = x + self.drop_path(self.mlp(self.norm2(x)))
-        return x
+    grid = grid.reshape([2, 1, grid_size, grid_size])
+    pos_embed = get_2d_sincos_pos_embed_from_grid(embed_dim, grid)
+    if cls_token:
+        pos_embed = np.concatenate([np.zeros([1, embed_dim]), pos_embed], axis=0)
+    return pos_embed
 
 
 class PatchEmbed(nn.Module):
@@ -231,64 +142,47 @@ class ConvEmbed(nn.Module):
 class VisionTransformerPredictor(nn.Module):
     """ Vision Transformer """
     def __init__(
-        self,
-        num_patches,
-        embed_dim=768,
-        predictor_embed_dim=384,
-        depth=6,
-        num_heads=12,
-        mlp_ratio=4.0,
-        qkv_bias=True,
-        qk_scale=None,
-        drop_rate=0.0,
-        attn_drop_rate=0.0,
-        drop_path_rate=0.0,
-        norm_layer=nn.LayerNorm,
-        init_std=0.02,
-        **kwargs
+            self,
+            img_size: int = 96,
+            patch_size: int = 8,
+            num_patches: int = 12*12,
+            embed_dim=768,
+            predictor_embed_dim=384,
+            num_heads: int = 12,
+            num_layers: int = 12,
+            num_classes: int = 0,
+            norm=nn.LayerNorm,
+            dropout: float = 0.1,
+            attention_dropout: float = 0.1,
     ):
         super().__init__()
+
+        # ViT encoder
+        self.vit = VisionTransformer(
+            image_size=img_size,  # TODO: Gros point d'inquiétude ici
+            patch_size=patch_size,  # TODO: Gros point d'inquiétude ici
+            num_layers=num_layers,
+            num_heads=num_heads,
+            hidden_dim=embed_dim,  # TODO: Gros point d'inquiétude ici
+            mlp_dim=4 * embed_dim,  # TODO: Gros point d'inquiétude ici
+            dropout=dropout,
+            attention_dropout=attention_dropout,
+            num_classes=num_classes,
+            norm_layer=norm,
+        )
+
         self.predictor_embed = nn.Linear(embed_dim, predictor_embed_dim, bias=True)
         self.mask_token = nn.Parameter(torch.zeros(1, 1, predictor_embed_dim))
-        dpr = [x.item() for x in torch.linspace(0, drop_path_rate, depth)]  # stochastic depth decay rule
-        # --
+        self.predictor_proj = nn.Linear(predictor_embed_dim, embed_dim, bias=True)
+        self.predictor_norm = norm(predictor_embed_dim)
+
+        # Positional embedding
         self.predictor_pos_embed = nn.Parameter(torch.zeros(1, num_patches, predictor_embed_dim),
                                                 requires_grad=False)
         predictor_pos_embed = get_2d_sincos_pos_embed(self.predictor_pos_embed.shape[-1],
                                                       int(num_patches**.5),
                                                       cls_token=False)
         self.predictor_pos_embed.data.copy_(torch.from_numpy(predictor_pos_embed).float().unsqueeze(0))
-        # --
-        self.predictor_blocks = nn.ModuleList([
-            Block(
-                dim=predictor_embed_dim, num_heads=num_heads, mlp_ratio=mlp_ratio, qkv_bias=qkv_bias, qk_scale=qk_scale,
-                drop=drop_rate, attn_drop=attn_drop_rate, drop_path=dpr[i], norm_layer=norm_layer)
-            for i in range(depth)])
-        self.predictor_norm = norm_layer(predictor_embed_dim)
-        self.predictor_proj = nn.Linear(predictor_embed_dim, embed_dim, bias=True)
-        # ------
-        self.init_std = init_std
-        self.apply(self._init_weights)
-        self.fix_init_weight()
-
-    def fix_init_weight(self):
-        def rescale(param, layer_id):
-            param.div_(math.sqrt(2.0 * layer_id))
-
-        for layer_id, layer in enumerate(self.predictor_blocks):
-            rescale(layer.attn.proj.weight.data, layer_id + 1)
-            rescale(layer.mlp.fc2.weight.data, layer_id + 1)
-
-    def _init_weights(self, m):
-        if isinstance(m, nn.Linear):
-            if isinstance(m, nn.Linear) and m.bias is not None:
-                nn.init.constant_(m.bias, 0)
-        elif isinstance(m, nn.LayerNorm):
-            nn.init.constant_(m.bias, 0)
-            nn.init.constant_(m.weight, 1.0)
-        elif isinstance(m, nn.Conv2d):
-            if m.bias is not None:
-                nn.init.constant_(m.bias, 0)
 
     def forward(self, x, masks_x, masks):
         assert (masks is not None) and (masks_x is not None), 'Cannot run predictor without mask indices'
@@ -299,35 +193,35 @@ class VisionTransformerPredictor(nn.Module):
         if not isinstance(masks, list):
             masks = [masks]
 
-        # -- Batch Size
+        # Batch size
         B = len(x) // len(masks_x)
 
-        # -- map from encoder-dim to pedictor-dim
+        # Embed to predictor dimension
         x = self.predictor_embed(x)
 
-        # -- add positional embedding to x tokens
+        # Positional embedding
         x_pos_embed = self.predictor_pos_embed.repeat(B, 1, 1)
         x += apply_masks(x_pos_embed, masks_x)
 
+        # TODO: pas clair du tout
         _, N_ctxt, D = x.shape
 
-        # -- concat mask tokens to x
+        # Masking
         pos_embs = self.predictor_pos_embed.repeat(B, 1, 1)
         pos_embs = apply_masks(pos_embs, masks)
-        pos_embs = repeat_interleave_batch(pos_embs, B, repeat=len(masks_x))
-        # --
+        pos_embs = repeat_interleave_batch(pos_embs, B, repeat=len(masks_x))  # FIXME: pas clair du tout
+
         pred_tokens = self.mask_token.repeat(pos_embs.size(0), pos_embs.size(1), 1)
-        # --
         pred_tokens += pos_embs
+
         x = x.repeat(len(masks), 1, 1)
         x = torch.cat([x, pred_tokens], dim=1)
 
-        # -- fwd prop
-        for blk in self.predictor_blocks:
-            x = blk(x)
-        x = self.predictor_norm(x)
+        # Forward propagation
+        x = self.vit(x)
+        x = self.predictor_norm(x)  # FIXME: utile si norm dans vit ?
 
-        # -- return preds for mask tokens
+        # TODO: pas clair du tout
         x = x[:, N_ctxt:]
         x = self.predictor_proj(x)
 
@@ -337,33 +231,37 @@ class VisionTransformerPredictor(nn.Module):
 class ViTEncoder(nn.Module):
     """ Vision Transformer Encoder : Context-Encoder / Target-Encoder """
     def __init__(
-        self,
-        img_size: int = 96,
-        patch_size: int = 16,
-        in_chans=3,
-        embed_dim=768,
-        num_heads: int = 12,
-        num_layers: int = 12,
-        num_classes: int = 0,
-        norm_layer=nn.LayerNorm,
-        **kwargs
+            self,
+            img_size: int = 96,
+            patch_size: int = 8,
+            in_chans=3,
+            embed_dim=768,
+            num_heads: int = 12,
+            num_layers: int = 12,
+            num_classes: int = 0,
+            norm=nn.LayerNorm,
+            dropout: float = 0.1,
+            attention_dropout: float = 0.1,
     ):
         super().__init__()
 
         # ViT encoder
-        self.encoder = VisionTransformer(
+        self.vit = VisionTransformer(
             image_size=img_size,
             patch_size=patch_size,
             num_layers=num_layers,
             num_heads=num_heads,
             hidden_dim=embed_dim,
             mlp_dim=4 * embed_dim,
+            dropout=dropout,
+            attention_dropout=attention_dropout,
             num_classes=num_classes,
+            norm_layer=norm,
         )
 
-        self.encoder.heads = nn.Identity()
+        self.vit.heads = nn.Identity()
 
-        self.norm_layer = norm_layer
+        self.norm = norm(embed_dim)
 
         # Patch embedding
         self.patch_embed = PatchEmbed(
@@ -412,11 +310,11 @@ class ViTEncoder(nn.Module):
         if masks is not None:
             x = apply_masks(x, masks)
 
-        # Forward pass
-        x = self.encoder(x)
+        # Forward propagation
+        x = self.vit(x)
 
         # Normalization layer
-        if self.norm_layer is not None:
-            x = self.norm_layer(x)
+        if self.norm is not None:
+            x = self.norm(x)  # FIXME: utile si norm dans vit ?
 
         return x

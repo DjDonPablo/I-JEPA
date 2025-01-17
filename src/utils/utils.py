@@ -34,3 +34,12 @@ def patches_to_image(patches: torch.Tensor, patch_size: int, H: int, W: int) -> 
     x = patches.view(B, N, C * p * p).transpose(1, 2)  # (B, C*p^2, N)
     images = fold(x)  # (B, C, H, W)
     return images
+
+
+def repeat_interleave_batch(x, B, repeat):
+    N = len(x) // B
+    x = torch.cat([
+        torch.cat([x[i*B:(i+1)*B] for _ in range(repeat)], dim=0)
+        for i in range(N)
+    ], dim=0)
+    return x
