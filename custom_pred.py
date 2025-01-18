@@ -120,6 +120,14 @@ class EncoderBlock(nn.Module):
         return x + y
 
 
+def repeat_interleave_batch(x, B, repeat):
+    N = len(x) // B
+    x = torch.cat([
+        torch.cat([x[i * B:(i + 1) * B] for _ in range(repeat)], dim=0)
+        for i in range(N)
+    ], dim=0)
+    return x
+
 class Encoder(nn.Module):
     """Transformer Model Encoder for sequence to sequence translation."""
 
@@ -151,14 +159,28 @@ class Encoder(nn.Module):
             )
         self.layers = nn.Sequential(layers)
         self.ln = norm_layer(hidden_dim)
+        self.mask_token = nn.Parameter(torch.zeros(1, 1, hidden_dim))
 
 
-    def forward(self, input: torch.Tensor, mask: Optional[torch.Tensor] = None):
+
+    def forward(self, input: torch.Tensor, mask_enc: torch.Tensor, mask_pred: torch.Tensor):
         torch._assert(input.dim() == 3, f"Expected (batch_size, seq_length, hidden_dim) got {input.shape}")
         input = input + self.pos_embedding
-        if mask:
-            apply_masks(input, mask)
+        if mask_enc:
+            input += apply_masks(input, mask_enc)
 
+        pos_embs = torch.zeros_like(input) + self.pos_embedding
+        if mask_pred:
+            pos_embs = apply_masks(pos_embs, mask_pred)
+
+        pos_embs = repeat_interleave_batch(pos_embs)
+        # trunc_normal_ ?
+        pred_tokens = self.mask_token.repeat(pos_embs.size(0), pos_embs.size(1), 1)
+    
+        pred_tokens += pos_embs
+        input = input.repeat(len(mask_pred), 1, 1)
+        input = torch.cat([input, pred_tokens], dim=1)
+        
         return self.ln(self.layers(self.dropout(input)))
 
 
@@ -232,7 +254,6 @@ class TransformerPrediction(nn.Module):
         self.predictor_embed = nn.Linear(embed_dim, predictor_embed_dim, bias=True)
         self.predictor_proj = nn.Linear(predictor_embed_dim, embed_dim, bias=True)
 
-        self.mask_token = nn.Parameter(torch.zeros(1, 1, predictor_embed_dim))
 
         # TODO:
         #trunc_normal_(self.mask_token, std=self.init_std) # 0.02
@@ -311,7 +332,7 @@ class TransformerPrediction(nn.Module):
         return x
 
     def forward(self, x: torch.Tensor, mask_enc: Optional[torch.Tensor], mask_pred: Optional[torch.Tensor]):
-        assert (masks is not None) and (masks_x is not None), 'Cannot run predictor without mask indices'
+        assert (mask_enc is not None) and (mask_pred is not None), 'Cannot run predictor without mask indices'
         # Reshape and permute the input tensor
 
         # TODO: verify if really useless
@@ -327,15 +348,21 @@ class TransformerPrediction(nn.Module):
         n = x.shape[0]
 
         # Expand the class token to the full batch
-        batch_class_token = self.class_token.expand(n, -1, -1)
-        x = torch.cat([batch_class_token, x], dim=1)
-
+        batch_class_token = self.class_token.expand(n, -1, -1)  # TODO useful ???
+        x = torch.cat([batch_class_token, x], dim=1)            # TODO useful ???
+        
+        self.predictor_embed(x)
         x = self.encoder(x, mask_enc, mask_pred)
 
         # Classifier "token" as used by standard language architectures
-        x = x[:, 0]
+        # x = x[:, 0]
 
-        x = self.heads(x)
+        # x = self.heads(x)
+        
+        _, N_ctxt, _ = x.shape
+        x = x[:, N_ctxt:]
+
+        self.predictor_proj(x)
 
         return x
 
