@@ -3,8 +3,8 @@ import torch.nn as nn
 import torch.optim as optim
 
 from torch.utils.data import DataLoader, random_split
-from model.i_jepa import ViTEncoder
-from src.dataset.dataset import JEPADataset
+from src.model.i_jepa import ViTEncoder, ViTPredictor
+from src.dataset import JEPADataset
 from src.mask.multiblock import MaskCollator as MBMaskCollator
 from torch.optim import lr_scheduler
 
@@ -15,7 +15,6 @@ def train(
     model: ViTEncoder,
     loader: DataLoader,
     optimizer: optim.AdamW,
-    criterion: nn.MSELoss,
     device: str,
 ):
     model.train()
@@ -28,8 +27,7 @@ def train(
         masks_pred = [u.to(device) for u in masks_pred]
 
         # TODO : pass through each model
-        outputs = model(images, masks_enc)
-        loss = criterion(outputs, []) # TODO : loss between embeddings from predictor and target, for loop on the 4 masks
+        loss = model(images, masks_enc)
 
         optimizer.zero_grad()
         loss.backward()
@@ -114,7 +112,7 @@ if __name__ == "__main__":
     )
 
     dataset = JEPADataset(
-        dataset_path="dataset/archive",  # TODO : adapt to your path
+        dataset_path="src/dataset",  # TODO : adapt to your path
         labels_filename="labels.csv",
     )
 
@@ -135,20 +133,22 @@ if __name__ == "__main__":
     # model
     #
     print("Loading models...")
-    terminator = ViTEncoder()
+    madame_zaza = ViTEncoder()
+    madame_zizi = ViTPredictor()
+    madame_zozo = ViTEncoder()
 
-    #
+    # ==== CONTEXT ENCODER ====
     # optimizer, scheduler, loss
     #
     criterion = nn.MSELoss(reduce="sum")
-    optimizer = optim.AdamW(terminator.parameters(), lr=learning_rate, weight_decay=0.04)
+    optimizer = optim.AdamW(madame_zaza.parameters(), lr=learning_rate, weight_decay=0.04)
 
     weight_decay_scheduler = LinearWeightDecay(adamw=optimizer, initial_wd=0.04, end_wd=0.4, num_steps=epochs)
 
     scheduler1 = lr_scheduler.MultiplicativeLR(
         optimizer, lr_lambda=lambda x: x * 1.16585
     )
-    scheduler2 = lr_scheduler.CosineAnnealingLR(optimizer, eta_min=1e-6)
+    scheduler2 = lr_scheduler.CosineAnnealingLR(optimizer, eta_min=1e-6, T_max=10000)
     scheduler = lr_scheduler.SequentialLR(
         optimizer, schedulers=[scheduler1, scheduler2], milestones=[15]
     )
@@ -157,7 +157,7 @@ if __name__ == "__main__":
     # loop
     #
     best_val_loss = 10e6
-    for epoch in epochs:
+    for epoch in range(epochs):
         train_loss, train_samples = train(criterion=criterion, device=device, loader=test_loader, model=terminator, optimizer=optimizer)
         val_loss, val_samples = eval(criterion=criterion, device=device, loader=test_loader, model=terminator, optimizer=optimizer)
 

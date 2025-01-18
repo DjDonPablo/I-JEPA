@@ -1,14 +1,14 @@
 import torch.nn as nn
 
-from vit import TransformerEncoder
-from ...custom_pred import TransformerPrediction
+from src.model.vit import TransformerEncoder
+from src.mask.mask import apply_masks
+from custom_pred import TransformerPrediction
 
 class ViTEncoder(nn.Module):
     def __init__(
         self,
         image_size: int = 96,  # dataset depedant
         patch_size: int = 8,  # -> 96 / 12 = 8 (get close to the paper '14')
-        in_chans=3,  # 3, see dataset description
         embed_dim=192,  # 192 -> vit_tiny implem
         num_heads: int = 12,  # TODO: find good value between 12-100 (8 in source code)
         num_layers: int = 12,  # TODO: find good value
@@ -47,7 +47,6 @@ class ViTPredictor(nn.Module):
             self,
             image_size: int = 96,           # dataset depedant
             patch_size: int = 8,            # -> 96 / 12 = 8 (get close to the paper '14')
-
             embed_dim: int = 192,           # 192 -> vit_tiny implem
             predictor_embed_dim: int = 96,  # 96
             num_heads: int = 12,            # TODO: find good value between 12-100 (8 in source code)
@@ -81,15 +80,35 @@ class ViTPredictor(nn.Module):
         x = self.vit(x, masks_enc, mask_pred)
         return x
 
+class IJEPA(nn.Module):
+    def __init__(
+            self,
+            nb_mask: int = 4,
+            image_size: int = 96,
+            patch_size: int = 12,
+            embed_dim: int = 192,
+            num_heads: int = 6,
+            num_layers: int = 6,
+        ):
+        super().__init__()
+        self.nb_mask = nb_mask
+        self.context_encoder = ViTEncoder(embed_dim=embed_dim, image_size=image_size, patch_size=patch_size, num_heads=num_heads, num_layers=num_layers)
+        self.predictor = ViTPredictor(embed_dim=embed_dim // 2, image_size=image_size, patch_size=patch_size, num_heads=num_heads, num_layers=num_layers)
+        self.target_encoder = ViTEncoder(embed_dim=embed_dim, image_size=image_size, patch_size=patch_size, num_heads=num_heads, num_layers=num_layers)
+        self.target_encoder.load_state_dict(self.context_encoder.state_dict())
 
+        self.criterion = nn.MSELoss(reduction="sum")
 
+    def forward(self, x, mask_enc, mask_pred):
+        loss = 0
+        x = self.context_encoder(x, mask_enc)
+        targets = self.target_encoder(x)
 
+        for i in range(self.nb_mask):
+            v  = self.predictor(x, mask_enc, mask_pred[i])
+            target = apply_masks(targets, mask_pred[i])
 
+            # compare v with the target mask
+            loss += self.criterion(v, target)
 
-
-
-
-
-
-
-
+        return loss
