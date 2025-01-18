@@ -29,16 +29,10 @@ class JEPADataset(Dataset):
         return len(self.df)
 
     def __getitem__(self, idx):
-        """
-        TODO: comment
-        """
         img_path = os.path.join(self.dataset_path, self.df.iloc[idx]["pth"])
         label = self.df.iloc[idx]["label_encoded"]
-        img = pil_to_tensor(Image.open(img_path)).float()  # 3 x 96 x 96
+        img = pil_to_tensor(Image.open(img_path)).float() / 255  # 3 x 96 x 96
 
         target = torch.zeros(self.nb_classes)
         target[label] = 1.0
-        return (
-            img,
-            target,
-        )
+        return img  # , target

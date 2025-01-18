@@ -1,10 +1,7 @@
 import torch.nn as nn
-import torch
 
-
-from mask.mask import apply_masks
-from ..custom_vit import TransformerEncoder
-from ..custom_pred import TransformerPrediction
+from vit import TransformerEncoder
+from ...custom_pred import TransformerPrediction
 
 class ViTEncoder(nn.Module):
     def __init__(
