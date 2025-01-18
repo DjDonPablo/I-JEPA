@@ -162,16 +162,17 @@ class Encoder(nn.Module):
         return self.ln(self.layers(self.dropout(input)))
 
 
-class TransformerEncoder(nn.Module):
+class TransformerPrediction(nn.Module):
     """Vision Transformer as per https://arxiv.org/abs/2010.11929."""
 
     def __init__(
         self,
-        image_size: int,
-        patch_size: int,
+        num_patches: int,           # new
+        embed_dim: int,             # new
+        predictor_embed_dim: int,   # new
+
         num_layers: int,
         num_heads: int,
-        hidden_dim: int,
         mlp_dim: int,
         dropout: float = 0.0,
         attention_dropout: float = 0.0,
@@ -182,10 +183,15 @@ class TransformerEncoder(nn.Module):
     ):
         super().__init__()
         _log_api_usage_once(self)
-        torch._assert(image_size % patch_size == 0, "Input shape indivisible by patch size!")
-        self.image_size = image_size
-        self.patch_size = patch_size
-        self.hidden_dim = hidden_dim
+        self.num_patches = num_patches
+        self.embed_dim = embed_dim
+        self.predictor_embed_dim = predictor_embed_dim
+
+        #torch._assert(image_size % patch_size == 0, "Input shape indivisible by patch size!")
+        #self.image_size = image_size
+        #self.patch_size = patch_size
+        #self.hidden_dim = hidden_dim
+
         self.mlp_dim = mlp_dim
         self.attention_dropout = attention_dropout
         self.dropout = dropout
@@ -218,21 +224,31 @@ class TransformerEncoder(nn.Module):
         # else:
 
         # patch embed
-        self.conv_proj = nn.Conv2d(
-            in_channels=3, out_channels=hidden_dim, kernel_size=patch_size, stride=patch_size
-        )
+        # self.conv_proj = nn.Conv2d(
+        #     in_channels=3, out_channels=hidden_dim, kernel_size=patch_size, stride=patch_size
+        # )
 
-        seq_length = (image_size // patch_size) ** 2
+
+        self.predictor_embed = nn.Linear(embed_dim, predictor_embed_dim, bias=True)
+        self.predictor_proj = nn.Linear(predictor_embed_dim, embed_dim, bias=True)
+
+        self.mask_token = nn.Parameter(torch.zeros(1, 1, predictor_embed_dim))
+
+        # TODO:
+        #trunc_normal_(self.mask_token, std=self.init_std) # 0.02
+
+
+        # ------------ old
+        seq_length = num_patches + 1
 
         # Add a class token
-        self.class_token = nn.Parameter(torch.zeros(1, 1, hidden_dim))
-        seq_length += 1
+        self.class_token = nn.Parameter(torch.zeros(1, 1, predictor_embed_dim))
 
         self.encoder = Encoder(
             seq_length,
             num_layers,
             num_heads,
-            hidden_dim,
+            predictor_embed_dim,
             mlp_dim,
             dropout,
             attention_dropout,
@@ -242,27 +258,27 @@ class TransformerEncoder(nn.Module):
 
         heads_layers: OrderedDict[str, nn.Module] = OrderedDict()
         if representation_size is None:
-            heads_layers["head"] = nn.Linear(hidden_dim, num_classes)
+            heads_layers["head"] = nn.Linear(predictor_embed_dim, num_classes)
         else:
-            heads_layers["pre_logits"] = nn.Linear(hidden_dim, representation_size)
+            heads_layers["pre_logits"] = nn.Linear(predictor_embed_dim, representation_size)
             heads_layers["act"] = nn.Tanh()
             heads_layers["head"] = nn.Linear(representation_size, num_classes)
 
         self.heads = nn.Sequential(heads_layers)
 
-        if isinstance(self.conv_proj, nn.Conv2d):
-            # Init the patchify stem
-            fan_in = self.conv_proj.in_channels * self.conv_proj.kernel_size[0] * self.conv_proj.kernel_size[1]
-            nn.init.trunc_normal_(self.conv_proj.weight, std=math.sqrt(1 / fan_in))
-            if self.conv_proj.bias is not None:
-                nn.init.zeros_(self.conv_proj.bias)
-        elif self.conv_proj.conv_last is not None and isinstance(self.conv_proj.conv_last, nn.Conv2d):
-            # Init the last 1x1 conv of the conv stem
-            nn.init.normal_(
-                self.conv_proj.conv_last.weight, mean=0.0, std=math.sqrt(2.0 / self.conv_proj.conv_last.out_channels)
-            )
-            if self.conv_proj.conv_last.bias is not None:
-                nn.init.zeros_(self.conv_proj.conv_last.bias)
+        # if isinstance(self.conv_proj, nn.Conv2d):
+        #     # Init the patchify stem
+        #     fan_in = self.conv_proj.in_channels * self.conv_proj.kernel_size[0] * self.conv_proj.kernel_size[1]
+        #     nn.init.trunc_normal_(self.conv_proj.weight, std=math.sqrt(1 / fan_in))
+        #     if self.conv_proj.bias is not None:
+        #         nn.init.zeros_(self.conv_proj.bias)
+        # elif self.conv_proj.conv_last is not None and isinstance(self.conv_proj.conv_last, nn.Conv2d):
+        #     # Init the last 1x1 conv of the conv stem
+        #     nn.init.normal_(
+        #         self.conv_proj.conv_last.weight, mean=0.0, std=math.sqrt(2.0 / self.conv_proj.conv_last.out_channels)
+        #     )
+        #     if self.conv_proj.conv_last.bias is not None:
+        #         nn.init.zeros_(self.conv_proj.conv_last.bias)
 
         if hasattr(self.heads, "pre_logits") and isinstance(self.heads.pre_logits, nn.Linear):
             fan_in = self.heads.pre_logits.in_features
@@ -294,23 +310,27 @@ class TransformerEncoder(nn.Module):
 
         return x
 
+    def forward(self, x: torch.Tensor, mask_enc: Optional[torch.Tensor], mask_pred: Optional[torch.Tensor]):
+        assert (masks is not None) and (masks_x is not None), 'Cannot run predictor without mask indices'
+        # Reshape and permute the input tensor
 
-    def forward(self, x: torch.Tensor, mask: Optional[torch.Tensor]):
-        assert mask is not None, 'Cannot run ViT without mask indices'
+        # TODO: verify if really useless
+        # x = self._process_input(x)
 
         # TODO: verify utility
+        #if not isinstance(masks_x, list):
+        #    masks_x = [masks_x]
+        #
         #if not isinstance(masks, list):
         #    masks = [masks]
 
-        # Reshape and permute the input tensor
-        x = self._process_input(x)
         n = x.shape[0]
 
         # Expand the class token to the full batch
         batch_class_token = self.class_token.expand(n, -1, -1)
         x = torch.cat([batch_class_token, x], dim=1)
 
-        x = self.encoder(x, mask)
+        x = self.encoder(x, mask_enc, mask_pred)
 
         # Classifier "token" as used by standard language architectures
         x = x[:, 0]
