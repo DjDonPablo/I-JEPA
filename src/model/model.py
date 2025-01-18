@@ -2,7 +2,7 @@ import torch.nn as nn
 import torch
 from torchvision.models import VisionTransformer
 
-from src.utils.utils import image_to_patches, patches_to_image, repeat_interleave_batch, get_2d_sincos_pos_embed
+from src.utils.utils import repeat_interleave_batch, get_2d_sincos_pos_embed
 from src.mask.mask import apply_masks
 
 import numpy as np
@@ -43,7 +43,6 @@ class PatchEmbed(nn.Module):
         self.proj = nn.Conv2d(in_chans, embed_dim, kernel_size=patch_size, stride=patch_size)
 
     def forward(self, x):
-        B, C, H, W = x.shape
         x = self.proj(x).flatten(2).transpose(1, 2)
         return x
 
@@ -69,7 +68,7 @@ class ConvEmbed(nn.Module):
 
         # Comptute the number of patches
         stride_prod = int(np.prod(strides))
-        self.num_patches = (img_size[0] // stride_prod)**2
+        self.num_patches = (img_size // stride_prod)**2
 
     def forward(self, x):
         p = self.stem(x)
