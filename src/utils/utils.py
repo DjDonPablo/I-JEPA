@@ -1,5 +1,6 @@
 import torch
 import torch.nn as nn
+import numpy as np
 
 
 def image_to_patches(images: torch.Tensor, patch_size: int) -> torch.Tensor:

@@ -2,7 +2,7 @@ import torch.nn as nn
 import torch
 from torchvision.models import VisionTransformer
 
-from src.utils.utils import repeat_interleave_batch, get_2d_sincos_pos_embed
+from src.utils.utils import repeat_interleave_batch, get_2d_sincos_pos_embed, image_to_patches, patches_to_image
 from src.mask.mask import apply_masks
 
 import numpy as np
@@ -75,7 +75,7 @@ class ConvEmbed(nn.Module):
         return p.flatten(2).transpose(1, 2)
 
 
-class VisionTransformerPredictor(nn.Module):
+class ViTPredictor(nn.Module):
     """ Vision Transformer """
     def __init__(
             self,
@@ -254,3 +254,102 @@ class ViTEncoder(nn.Module):
             x = self.norm(x)  # FIXME: utile si norm dans vit ?
 
         return x
+
+
+class IJEPAModel(nn.Module):
+    def __init__(
+            self,
+            img_size: int = 96,
+            patch_size: int = 8,
+            num_patches: int = 12 * 12,
+            embed_dim=768,
+            predictor_embed_dim=384,
+            num_heads: int = 12,
+            num_layers: int = 12,
+            num_classes: int = 0,
+            norm=nn.LayerNorm,
+            dropout: float = 0.1,
+            attention_dropout: float = 0.1,
+            nb_masks: int = 5,
+    ):
+        super().__init__()
+
+        self.context_encoder = ViTEncoder(
+            img_size=img_size,
+            patch_size=patch_size,
+            embed_dim=embed_dim,
+            num_heads=num_heads,
+            num_layers=num_layers,
+            num_classes=num_classes,
+            norm=norm,
+            dropout=dropout,
+            attention_dropout=attention_dropout,
+        )
+        self.target_encoder = ViTEncoder(
+            img_size=img_size,
+            patch_size=patch_size,
+            embed_dim=embed_dim,
+            num_heads=num_heads,
+            num_layers=num_layers,
+            num_classes=num_classes,
+            norm=norm,
+            dropout=dropout,
+            attention_dropout=attention_dropout,
+        )
+        self.predictor = ViTPredictor(
+            img_size=img_size,
+            patch_size=patch_size,
+            num_patches=num_patches,
+            embed_dim=embed_dim,
+            predictor_embed_dim=predictor_embed_dim,
+            num_heads=num_heads,
+            num_layers=num_layers,
+            num_classes=num_classes,
+            norm=norm,
+            dropout=dropout,
+            attention_dropout=attention_dropout,
+        )
+
+        self.mask_token = nn.Parameter(torch.randn(1, embed_dim))
+
+        self.nb_masks = nb_masks
+        self.patch_size = patch_size
+
+    def forward(self, images, context_indices, masks):
+        """
+        images: (B, 3, 96, 96)
+        context_indices: (B, 144) with some -1 paddings
+        masks: (B, nb_masks-1, max_mask_length) with -1 paddings
+        """
+        B, C, H, W = images.shape
+
+        patches = image_to_patches(images, patch_size=self.patch_size)
+        masked_images = torch.zeros_like(images)  # (B, 3, H, W)
+
+        for batch in range(B):
+            valid_idxs = context_indices[batch][context_indices[batch] != -1]
+            for idx_ in valid_idxs:
+                idx_int = idx_.item()  # 0..143
+                row = idx_int // (W // self.patch_size)  # e.g. 12
+                col = idx_int % (W // self.patch_size)
+                y0, x0 = row * self.patch_size, col * self.patch_size
+                masked_images[batch, :, y0:y0 + self.patch_size, x0:x0 + self.patch_size] = patches[batch, idx_int]
+
+        context_emb = self.context_encoder(masked_images)  # (B, embed_dim)
+        target_emb = self.target_encoder(images)  # (B, embed_dim)
+
+        predictions = []
+        target_reps = []
+
+        for m_i in range(masks.shape[1]):
+            mask_tok = self.mask_token.expand(B, -1)  # (B, embed_dim)
+
+            # Predict
+            pred_i = self.predictor(context_emb, mask_tok)  # (B, embed_dim)
+            predictions.append(pred_i)      # (B, embed_dim)
+            target_reps.append(target_emb)  # (B, embed_dim)
+
+        final_patches = patches.clone()  # shape (B,144,3,8,8)
+
+        reconstructed = patches_to_image(final_patches, self.patch_size, H, W)  # (B,3,96,96)
+        return context_emb, target_emb, reconstructed

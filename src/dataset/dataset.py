@@ -71,7 +71,7 @@ class AffectNetDataset(Dataset):
 
         return height, width
 
-    def __get_item__(self, idx):
+    def __getitem__(self, idx):
         """
         Returns a tuple of 3 elements:
         -
