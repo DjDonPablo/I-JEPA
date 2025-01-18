@@ -2,14 +2,11 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 
-from torchvision.transforms import Compose, Resize, ToTensor, Normalize
-from torch.utils.data import DataLoader
-from torch import dataloader
+from torch.utils.data import DataLoader, random_split
 from src.our_code import ViTEncoder
-from src.dataset import JEPADataset
+from src.dataset.dataset import JEPADataset
+from src.mask.mask import generate_masks
 
-
-"C:\\Users\\rokra\\OneDrive\\Bureau\\DeepNeuralNetwork\\I-JEPA\\dataset"
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -21,8 +18,12 @@ def train(model, loader, optimizer, criterion, device):
     correct = 0
     total = 0
 
-    for images, labels, context_mask, _ in loader:
-        images, labels, context_mask = images.to(device), labels.to(device), context_mask.to(device)
+    for images, labels in loader:
+        images, labels = (
+            images.to(device),
+            labels.to(device),
+        )
+        context_mask = generate_masks(4, 8, 32)
 
         # Forward pass
         outputs = model(images, context_mask)
@@ -52,8 +53,11 @@ def evaluate(model, loader, criterion, device):
     total = 0
 
     with torch.no_grad():
-        for images, labels, context_mask, _ in loader:
-            images, labels, context_mask = images.to(device), labels.to(device), context_mask.to(device)
+        for images, labels in loader:
+            images, labels = (
+                images.to(device),
+                labels.to(device),
+            )
 
             outputs = model(images)
             loss = criterion(outputs, labels)
@@ -68,12 +72,23 @@ def evaluate(model, loader, criterion, device):
     return avg_loss, accuracy
 
 
-if __name__ == "main":
+if __name__ == "__main__":
     batch_size = 32
     num_epochs = 10
     learning_rate = 1e-3
 
-    dataset = JEPADataset()
+    dataset = JEPADataset(
+        dataset_path="dataset/archive",
+        labels_filename="labels.csv",
+    )
+
+    generator1 = torch.Generator().manual_seed(42)
+    train_dataset, test_dataset = random_split(
+        dataset, [0.8, 0.2], generator=generator1
+    )
+
+    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
+    test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=True)
 
     model = ViTEncoder(num_classes=8)
     model.to(device)
