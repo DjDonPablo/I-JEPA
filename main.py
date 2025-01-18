@@ -8,6 +8,8 @@ from src.dataset.dataset import JEPADataset
 from src.mask.multiblock import MaskCollator as MBMaskCollator
 from torch.optim import lr_scheduler
 
+from src.utils.utils import LinearWeightDecay
+
 
 def train(
     model: ViTEncoder,
@@ -139,7 +141,10 @@ if __name__ == "__main__":
     # optimizer, scheduler, loss
     #
     criterion = nn.MSELoss(reduce="sum")
-    optimizer = optim.AdamW(terminator.parameters(), lr=learning_rate, weight_decay=0.04 -> 0.4)
+    optimizer = optim.AdamW(terminator.parameters(), lr=learning_rate, weight_decay=0.04)
+
+    weight_decay_scheduler = LinearWeightDecay(adamw=optimizer, initial_wd=0.04, end_wd=0.4, num_steps=epochs)
+
     scheduler1 = lr_scheduler.MultiplicativeLR(
         optimizer, lr_lambda=lambda x: x * 1.16585
     )
@@ -170,3 +175,4 @@ if __name__ == "__main__":
             torch.save(checkpoint, "checkpoint.pth")
 
         scheduler.step()
+        weight_decay_scheduler.step()

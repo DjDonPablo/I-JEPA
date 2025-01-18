@@ -1,5 +1,6 @@
 import torch
 import torch.nn as nn
+import torch.optim as optim
 import numpy as np
 
 
@@ -107,3 +108,19 @@ def get_2d_sincos_pos_embed(embed_dim, grid_size, cls_token=False):
     if cls_token:
         pos_embed = np.concatenate([np.zeros([1, embed_dim]), pos_embed], axis=0)
     return pos_embed
+
+
+class LinearWeightDecay:
+    def __init__(self, adamw: optim.AdamW, initial_wd, end_wd, num_steps):
+        self.adamw = adamw
+        self.initial_wd = initial_wd
+        self.end_wd = end_wd
+        self.num_steps = num_steps
+        self.linear_increase = (end_wd - initial_wd) / num_steps
+        self.step_count = 0
+
+    def step(self):
+        self.step_count += 1
+        new_wd = self.initial_wd + self.linear_increase * self.step_count
+        for param_group in self.adamw.param_groups:
+            param_group['weight_decay'] = new_wd
