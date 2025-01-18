@@ -9,7 +9,7 @@ from PIL import Image
 from typing import Tuple
 
 
-class AffectNetDataset(Dataset):
+class JEPADataset(Dataset):
     def __init__(
         self,
         dataset_path: str,
@@ -57,11 +57,13 @@ class AffectNetDataset(Dataset):
         scale = torch.FloatTensor(n).uniform_(*self.scale_range_mask)
 
         aspect_ratio = torch.cat(
-            aspect_ratio,
-            torch.FloatTensor(1).uniform_(*self.aspect_ratio_range_context),
+            (
+                aspect_ratio,
+                torch.FloatTensor(1).uniform_(*self.aspect_ratio_range_context),
+            )
         )
         scale = torch.cat(
-            scale, torch.FloatTensor(1).uniform_(*self.scale_range_context)
+            (scale, torch.FloatTensor(1).uniform_(*self.scale_range_context))
         )
 
         # calculate area, width and height of each mask and context
@@ -73,13 +75,10 @@ class AffectNetDataset(Dataset):
 
     def __getitem__(self, idx):
         """
-        Returns a tuple of 3 elements:
-        -
-        -
-        -
+        TODO: comment
         """
         img_path = os.path.join(self.dataset_path, self.df.iloc[idx]["pth"])
-        img = pil_to_tensor(Image.open(img_path))  # 96 x 96 x 3
+        img = pil_to_tensor(Image.open(img_path))  # 3 x 96 x 96
 
         # random height and width for masks
         heights, widths = self.get_random_width_and_height(self.nb_mask)
@@ -112,20 +111,7 @@ class AffectNetDataset(Dataset):
         )
 
         return (
-            img.view(  # 144 x 8 x 8 x 3
-                self.sqrt_count_patch**2,
-                self.patch_size,
-                self.patch_size,
-                3,
-            ),
+            img,
             context_indexes - masks_indexes,
             masks,
         )
-
-
-# dataset = AffectNetDataset(
-#     dataset_path=os.path.join("dataset", "archive"),
-#     labels_filename="labels.csv",
-#     img_size=96,
-#     patch_size=8,
-# )
