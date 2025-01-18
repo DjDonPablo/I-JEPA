@@ -78,6 +78,7 @@ class JEPADataset(Dataset):
         TODO: comment
         """
         img_path = os.path.join(self.dataset_path, self.df.iloc[idx]["pth"])
+        label = self.df.iloc[idx]["label"]
         img = pil_to_tensor(Image.open(img_path))  # 3 x 96 x 96
 
         # random height and width for masks
@@ -112,6 +113,7 @@ class JEPADataset(Dataset):
 
         return (
             img,
+            label,
             context_indexes - masks_indexes,
             masks,
         )

@@ -240,15 +240,15 @@ class VisionTransformer(nn.Module):
         )
         self.seq_length = seq_length
 
-        # heads_layers: OrderedDict[str, nn.Module] = OrderedDict()
-        # if representation_size is None:
-        #     heads_layers["head"] = nn.Linear(hidden_dim, num_classes)
-        # else:
-        #     heads_layers["pre_logits"] = nn.Linear(hidden_dim, representation_size)
-        #     heads_layers["act"] = nn.Tanh()
-        #     heads_layers["head"] = nn.Linear(representation_size, num_classes)
+        heads_layers: OrderedDict[str, nn.Module] = OrderedDict()
+        if representation_size is None:
+            heads_layers["head"] = nn.Linear(hidden_dim, num_classes)
+        else:
+            heads_layers["pre_logits"] = nn.Linear(hidden_dim, representation_size)
+            heads_layers["act"] = nn.Tanh()
+            heads_layers["head"] = nn.Linear(representation_size, num_classes)
 
-        # self.heads = nn.Sequential(heads_layers)
+        self.heads = nn.Sequential(heads_layers)
 
         if isinstance(self.conv_proj, nn.Conv2d):
             # Init the patchify stem
@@ -303,12 +303,12 @@ class VisionTransformer(nn.Module):
         batch_class_token = self.class_token.expand(n, -1, -1)
         x = torch.cat([batch_class_token, x], dim=1)
 
-        x = self.encoder(x, )
+        x = self.encoder(x, mask)
 
         # Classifier "token" as used by standard language architectures
         x = x[:, 0]
 
-        # x = self.heads(x)
+        x = self.heads(x)
 
         return x
 

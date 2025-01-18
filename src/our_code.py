@@ -67,6 +67,8 @@ class ViTEncoder(nn.Module):
 
         # eux ils font une layernorm à la fin ???
 
+        x = self.vit(x)
+        
         return x
 
 
