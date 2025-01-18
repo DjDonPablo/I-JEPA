@@ -3,7 +3,7 @@ import torch.nn as nn
 from torch.optim import AdamW
 from torch.utils.data import DataLoader
 from src.dataset.dataset import AffectNetDataset
-from src.model.model import IJEPAModel
+from model.old_model import IJEPAModel
 from src.utils.utils import image_to_patches
 
 
@@ -13,7 +13,7 @@ def train_ijepa():
         labels_filename="labels.csv",
         img_size=96,
         patch_size=8,
-        nb_mask=4
+        nb_mask=4,
     )
     dataloader = DataLoader(dataset, batch_size=4, shuffle=True)
 
@@ -44,10 +44,14 @@ def train_ijepa():
             for m_i in range(masks.shape[1]):
                 block_idxs = masks[:, m_i, :]  # (B, max_mask_len)
                 for b in range(B):
-                    valid_mask_idxs = block_idxs[b][block_idxs[b] != -1]  # the patch indices for this mask
+                    valid_mask_idxs = block_idxs[b][
+                        block_idxs[b] != -1
+                    ]  # the patch indices for this mask
                     for idx_ in valid_mask_idxs:
                         idx_int = idx_.item()
-                        real_patch = original_patches[b, idx_int]  # => (3, 8, 8) if patch_size=8
+                        real_patch = original_patches[
+                            b, idx_int
+                        ]  # => (3, 8, 8) if patch_size=8
                         pred_patch = reconstructed_patches[b, idx_int]  # => (3, 8, 8)
 
                         pixel_recon_loss += loss_fn(pred_patch, real_patch)
@@ -85,6 +89,7 @@ def train_ijepa():
     recon_img = reconstructed[0].cpu().numpy().transpose(1, 2, 0)  # => (96,96,3)
 
     import matplotlib.pyplot as plt
+
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(8, 4))
     ax1.imshow(orig_img)
     ax1.set_title("Original Image")

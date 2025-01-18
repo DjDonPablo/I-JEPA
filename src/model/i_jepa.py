@@ -2,7 +2,7 @@ import torch.nn as nn
 import torch
 
 
-from custom_vit import VisionTransformer
+from model.vit import VisionTransformer
 
 
 class ViTEncoder(nn.Module):
