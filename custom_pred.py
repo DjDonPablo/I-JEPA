@@ -165,12 +165,21 @@ class Encoder(nn.Module):
 
     def forward(self, input: torch.Tensor, mask_enc: torch.Tensor, mask_pred: torch.Tensor):
         torch._assert(input.dim() == 3, f"Expected (batch_size, seq_length, hidden_dim) got {input.shape}")
+
+        print("forward encoder:", input.shape)
+        print("forward encoder:", self.pos_embedding.shape, end="\n\n")
+
         input = input + self.pos_embedding
-        if mask_enc:
+        if mask_enc is not None:
+            # ERROR HERE, here are few samples
+            # RuntimeError: The size of tensor a (64) must match the size of tensor b (12) at non-singleton dimension 1
+            # RuntimeError: The size of tensor a (64) must match the size of tensor b (13) at non-singleton dimension 1
+            # RuntimeError: The size of tensor a (64) must match the size of tensor b (16) at non-singleton dimension 1
+            # RuntimeError: The size of tensor a (64) must match the size of tensor b (15) at non-singleton dimension 1
             input += apply_masks(input, mask_enc)
 
         pos_embs = torch.zeros_like(input) + self.pos_embedding
-        if mask_pred:
+        if mask_pred is not None:
             pos_embs = apply_masks(pos_embs, mask_pred)
 
         pos_embs = repeat_interleave_batch(pos_embs)
@@ -260,10 +269,7 @@ class TransformerPrediction(nn.Module):
 
 
         # ------------ old
-        seq_length = num_patches + 1 #TODO: +1????
-
-        # Add a class token
-        self.class_token = nn.Parameter(torch.zeros(1, 1, predictor_embed_dim))
+        seq_length = num_patches
 
         self.encoder = Encoder(
             seq_length,
@@ -345,17 +351,18 @@ class TransformerPrediction(nn.Module):
         #if not isinstance(masks, list):
         #    masks = [masks]
 
-        self.predictor_embed(x)
+        print("EMBED ----------------------")
+        x = self.predictor_embed(x)
+
+        print("ENCODING ====================")
         x = self.encoder(x, mask_enc, mask_pred)
 
-        # Classifier "token" as used by standard language architectures
-        # x = x[:, 0]
-
         # x = self.heads(x)
-
+        print("SHAPE + SIZE CHANGE ^^^^^^^^^^^^^^^^^^^")
         _, N_ctxt, _ = x.shape
         x = x[:, N_ctxt:]
 
+        print("INV PROJ MMMMMMMMMMMMMMMMMMMMMM")
         self.predictor_proj(x)
 
         return x

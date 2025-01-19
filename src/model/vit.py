@@ -340,9 +340,6 @@ class TransformerEncoder(nn.Module):
 
         x = self.encoder(x, mask)
 
-        # Classifier "token" as used by standard language architectures
-        x = x[:, 0]
-
         x = self.heads(x)
 
         return x

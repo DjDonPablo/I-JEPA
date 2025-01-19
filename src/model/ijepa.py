@@ -104,7 +104,9 @@ class IJEPA(nn.Module):
         targets = self.target_encoder(x)
 
         for i in range(self.nb_mask):
+            print("CHECKPOINT IN ##################")
             v  = self.predictor(x_tmp, mask_enc, mask_pred[i])
+            print("CHECKPOINT OUT ##################")
             target = apply_masks(targets, mask_pred[i])
 
             # compare v with the target mask
