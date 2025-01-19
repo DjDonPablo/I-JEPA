@@ -358,7 +358,8 @@ class TransformerPrediction(nn.Module):
 
         print("EMBED ----------------------")
         x = self.predictor_embed(x)
-        _, N_ctxt, _ = x.shape
+
+        _, N_ctxt, _ = x.shape # TODO:??????
         print("ENCODING ====================")
         x = self.encoder(x, mask_enc, mask_pred)
 
