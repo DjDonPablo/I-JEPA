@@ -46,29 +46,22 @@ def train(
 def evaluate(
     model: IJEPA,
     loader: DataLoader,
-    optimizer: optim.AdamW,
-    criterion: nn.MSELoss,
-    device: str,
+    device,
 ):
     model.eval()
     val_loss = 0.0
     val_samples = 0
 
-    for images, masks_enc, masks_pred in loader:
-        images = images.to(device)
-        masks_enc = [u.to(device) for u in masks_enc]
-        masks_pred = [u.to(device) for u in masks_pred]
+    with torch.no_grad():
+        for images, masks_enc, masks_pred in loader:
+            images = images.to(device)
+            masks_enc = masks_enc[0].to(device)
+            masks_pred = [mask.to(device) for mask in masks_pred]
 
-        # TODO : pass through each model
-        outputs = model(images, masks_enc)
-        loss = criterion(outputs, []) # TODO : loss between embeddings from predictor and target, for loop on the 4 masks
+            loss = model(images, masks_enc, masks_pred)
 
-        optimizer.zero_grad()
-        loss.backward()
-        optimizer.step()
-
-        val_loss += loss.item()
-        val_samples += len(images)
+            val_loss += loss.item()
+            val_samples += images.size(0)
 
     return val_loss, val_samples
 
@@ -168,10 +161,10 @@ if __name__ == "__main__":
 
     for epoch in range(epochs):
         train_loss, train_samples = train(device=device, loader=train_loader, model=model, optimizer=optimizer, momentum_scheduler=momentum_scheduler)
-        val_loss, val_samples = eval(device=device, loader=test_loader, model=model, optimizer=optimizer)
+        val_loss, val_samples = evaluate(model=model, loader=test_loader, device=device)
 
         print(
-            f"Epoch [{epoch + 1}/{epoch}] - train loss: {train_loss / train_samples:4f.}, val loss: {val_loss / val_samples:4f.}, lr: {scheduler.get_last_lr()[0]}"
+            f"Epoch [{epoch + 1}/{epochs}] - train loss: {train_loss / train_samples}, val loss: {val_loss / val_samples}, lr: {scheduler.get_last_lr()[0]}"
         )
         if val_loss / val_samples < best_val_loss:
             best_val_loss = val_loss / val_samples
