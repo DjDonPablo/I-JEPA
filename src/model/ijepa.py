@@ -82,6 +82,7 @@ class ViTPredictor(nn.Module):
 class IJEPA(nn.Module):
     def __init__(
             self,
+            eval: bool = True,
             nb_mask: int = 4,
             image_size: int = 96,
             patch_size: int = 12,
@@ -90,6 +91,7 @@ class IJEPA(nn.Module):
             num_layers: int = 6,
         ):
         super().__init__()
+        self.eval = eval
         self.nb_mask = nb_mask
         self.context_encoder = ViTEncoder(embed_dim=embed_dim, image_size=image_size, patch_size=patch_size, num_heads=num_heads, num_layers=num_layers)
         self.predictor = ViTPredictor(embed_dim=embed_dim, predictor_embed_dim=embed_dim // 2, image_size=image_size, patch_size=patch_size, num_heads=num_heads, num_layers=num_layers)
@@ -98,7 +100,10 @@ class IJEPA(nn.Module):
 
         self.criterion = nn.MSELoss(reduction="sum")
 
-    def forward(self, x, mask_enc, mask_pred):
+    def forward(self, x, mask_enc= None, mask_pred=None):
+        if self.eval:
+            return self.target_encoder(x)
+
         loss = 0
         x_tmp = self.context_encoder(x, mask_enc)
         targets = self.target_encoder(x)
