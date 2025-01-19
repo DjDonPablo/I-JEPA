@@ -1,16 +1,14 @@
 import numpy as np
-import torch
 import torch.nn as nn
+import torch
 import torch.optim as optim
-from torch.optim.lr_scheduler import LambdaLR
 
+from torch.optim.lr_scheduler import LambdaLR
 from torch.utils.data import DataLoader, random_split
 from src.dataset import JEPADataset
 from src.mask.multiblock import MaskCollator as MBMaskCollator
-# from torch.optim import lr_scheduler
 from src.utils.utils import LinearWeightDecay
 from src.model.ijepa import IJEPA
-
 from tqdm import tqdm
 
 
@@ -18,8 +16,9 @@ def train(
     model: IJEPA,
     loader: DataLoader,
     optimizer: optim.AdamW,
-    device,
-    momentum_scheduler
+    criterion: nn.MSELoss,
+    device: str,
+    momentum_scheduler,
 ):
     model.train()
     train_loss = 0.0
@@ -30,7 +29,9 @@ def train(
         masks_enc = masks_enc[0].to(device)
         masks_pred = [mask.to(device) for mask in masks_pred]
 
-        loss = model(images, masks_enc, masks_pred)
+        mask_preds, target_preds = model(images, masks_enc, masks_pred)
+
+        loss = criterion(mask_preds, target_preds)
 
         optimizer.zero_grad()
         loss.backward()
@@ -38,8 +39,10 @@ def train(
 
         with torch.no_grad():
             m = next(momentum_scheduler)
-            for param_q, param_k in zip(model.context_encoder.parameters(), model.target_encoder.parameters()):
-                param_k.data.mul_(m).add_((1.-m) * param_q.detach().data)
+            for param_q, param_k in zip(
+                model.context_encoder.parameters(), model.target_encoder.parameters()
+            ):
+                param_k.data.mul_(m).add_((1.0 - m) * param_q.detach().data)
 
         train_loss += loss.item()
         train_samples += len(images)
@@ -50,7 +53,8 @@ def train(
 def evaluate(
     model: IJEPA,
     loader: DataLoader,
-    device,
+    criterion: nn.MSELoss,
+    device: str,
 ):
     model.eval()
     val_loss = 0.0
@@ -62,7 +66,9 @@ def evaluate(
             masks_enc = masks_enc[0].to(device)
             masks_pred = [mask.to(device) for mask in masks_pred]
 
-            loss = model(images, masks_enc, masks_pred)
+            mask_preds, target_preds = model(images, masks_enc, masks_pred)
+
+            loss = criterion(mask_preds, target_preds)
 
             val_loss += loss.item()
             val_samples += images.size(0)
@@ -80,7 +86,9 @@ def lr_scheduler(optimizer, warmup_epochs, total_epochs, initial_lr, peak_lr, fi
         else:
             # Décroissance cosinus après le warm-up
             progress = (epoch - warmup_epochs) / (total_epochs - warmup_epochs)
-            return final_lr + (peak_lr - final_lr) * 0.5 * (1 + np.cos(np.pi * progress))
+            return final_lr + (peak_lr - final_lr) * 0.5 * (
+                1 + np.cos(np.pi * progress)
+            )
 
     return LambdaLR(optimizer, lr_lambda)
 
@@ -128,12 +136,14 @@ if __name__ == "__main__":
     )
 
     dataset = JEPADataset(
-        dataset_path="src/dataset",  # TODO : adapt to your path
+        dataset_path="dataset/archive",  # TODO : adapt to your path
         labels_filename="labels.csv",
     )
 
     generator = torch.Generator().manual_seed(42)
-    train_dataset, test_dataset, val_dataset = random_split(dataset, [0.8, 0.1, 0.1], generator=generator)
+    train_dataset, test_dataset, val_dataset = random_split(
+        dataset, [0.8, 0.1, 0.1], generator=generator
+    )
 
     train_loader = DataLoader(
         train_dataset, batch_size=batch_size, collate_fn=mask_collator, shuffle=True
@@ -149,7 +159,14 @@ if __name__ == "__main__":
     # model
     #
     print("Loading models...")
-    model = IJEPA(nb_mask=num_target_patch, image_size=image_size, patch_size=patch_size, embed_dim=embed_dim, num_heads=num_heads, num_layers=num_layers).to(device)
+    model = IJEPA(
+        nb_mask=num_target_patch,
+        image_size=image_size,
+        patch_size=patch_size,
+        embed_dim=embed_dim,
+        num_heads=num_heads,
+        num_layers=num_layers,
+    ).to(device)
     # print(sum(p.numel() for p in model.parameters() if p.requires_grad))
 
     #
@@ -157,15 +174,11 @@ if __name__ == "__main__":
     #
     optimizer = optim.AdamW(model.parameters(), lr=learning_rate, weight_decay=0.04)
 
-    weight_decay_scheduler = LinearWeightDecay(adamw=optimizer, initial_wd=0.04, end_wd=0.4, num_steps=epochs)
+    criterion = nn.MSELoss(reduction="sum")
 
-    """scheduler1 = lr_scheduler.MultiplicativeLR(
-        optimizer, lr_lambda=lambda x: 1.16585
+    weight_decay_scheduler = LinearWeightDecay(
+        adamw=optimizer, initial_wd=0.04, end_wd=0.4, num_steps=epochs
     )
-    scheduler2 = lr_scheduler.CosineAnnealingLR(optimizer, eta_min=1e-5, T_max=10000)
-    scheduler = lr_scheduler.SequentialLR(
-        optimizer, schedulers=[scheduler1, scheduler2], milestones=[10]
-    )"""
 
     scheduler = lr_scheduler(optimizer, 15, epochs, 1.0, 10.0, 0.01)
 
@@ -177,12 +190,23 @@ if __name__ == "__main__":
     # Exponential moving average
     ema = (0.996, 1.0)
     ipe = len(train_loader)
-    momentum_scheduler = (ema[0] + i * (ema[1]-ema[0]) / (ipe * epochs)
-                          for i in range(int(ipe * epochs) + 1))
+    momentum_scheduler = (
+        ema[0] + i * (ema[1] - ema[0]) / (ipe * epochs)
+        for i in range(int(ipe * epochs) + 1)
+    )
 
     for epoch in range(epochs):
-        train_loss, train_samples = train(device=device, loader=train_loader, model=model, optimizer=optimizer, momentum_scheduler=momentum_scheduler)
-        val_loss, val_samples = evaluate(model=model, loader=test_loader, device=device)
+        train_loss, train_samples = train(
+            device=device,
+            loader=train_loader,
+            model=model,
+            optimizer=optimizer,
+            momentum_scheduler=momentum_scheduler,
+            criterion=criterion,
+        )
+        val_loss, val_samples = evaluate(
+            model=model, loader=test_loader, device=device, criterion=criterion
+        )
 
         print(
             f"Epoch [{epoch + 1}/{epochs}] - train loss: {train_loss / train_samples}, val loss: {val_loss / val_samples}, lr: {scheduler.get_last_lr()[0]}"

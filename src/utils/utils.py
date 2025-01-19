@@ -27,7 +27,9 @@ def image_to_patches(images: torch.Tensor, patch_size: int) -> torch.Tensor:
     return patches
 
 
-def patches_to_image(patches: torch.Tensor, patch_size: int, H: int, W: int) -> torch.Tensor:
+def patches_to_image(
+    patches: torch.Tensor, patch_size: int, H: int, W: int
+) -> torch.Tensor:
     """
     Rebuild (B,C,H,W) from (B,N,C,p,p).
     """
@@ -40,32 +42,32 @@ def patches_to_image(patches: torch.Tensor, patch_size: int, H: int, W: int) -> 
 
 def repeat_interleave_batch(x, B, repeat):
     N = len(x) // B
-    x = torch.cat([
-        torch.cat([x[i*B:(i+1)*B] for _ in range(repeat)], dim=0)
-        for i in range(N)
-    ], dim=0)
+    x = torch.cat(
+        [
+            torch.cat([x[i * B : (i + 1) * B] for _ in range(repeat)], dim=0)
+            for i in range(N)
+        ],
+        dim=0,
+    )
     return x
 
 
-def get_1d_sincos_pos_embed_from_grid(embed_dim, pos):
+def get_2d_sincos_pos_embed(embed_dim, grid_size, cls_token=False):
     """
-    embed_dim: output dimension for each position
-    pos: a list of positions to be encoded: size (M,)
-    out: (M, D)
+    grid_size: int of the grid height and width
+    return:
+    pos_embed: [grid_size*grid_size, embed_dim] or [1+grid_size*grid_size, embed_dim] (w/ or w/o cls_token)
     """
-    assert embed_dim % 2 == 0
-    omega = np.arange(embed_dim // 2, dtype=float)
-    omega /= embed_dim / 2.
-    omega = 1. / 10000**omega   # (D/2,)
+    grid_h = np.arange(grid_size, dtype=float)
+    grid_w = np.arange(grid_size, dtype=float)
+    grid = np.meshgrid(grid_w, grid_h)  # here w goes first
+    grid = np.stack(grid, axis=0)
 
-    pos = pos.reshape(-1)   # (M,)
-    out = np.einsum('m,d->md', pos, omega)   # (M, D/2), outer product
-
-    emb_sin = np.sin(out)  # (M, D/2)
-    emb_cos = np.cos(out)  # (M, D/2)
-
-    emb = np.concatenate([emb_sin, emb_cos], axis=1)  # (M, D)
-    return emb
+    grid = grid.reshape([2, 1, grid_size, grid_size])
+    pos_embed = get_2d_sincos_pos_embed_from_grid(embed_dim, grid)
+    if cls_token:
+        pos_embed = np.concatenate([np.zeros([1, embed_dim]), pos_embed], axis=0)
+    return pos_embed
 
 
 def get_2d_sincos_pos_embed_from_grid(embed_dim, grid):
@@ -92,22 +94,25 @@ def get_1d_sincos_pos_embed(embed_dim, grid_size, cls_token=False):
     return pos_embed
 
 
-def get_2d_sincos_pos_embed(embed_dim, grid_size, cls_token=False):
+def get_1d_sincos_pos_embed_from_grid(embed_dim, pos):
     """
-    grid_size: int of the grid height and width
-    return:
-    pos_embed: [grid_size*grid_size, embed_dim] or [1+grid_size*grid_size, embed_dim] (w/ or w/o cls_token)
+    embed_dim: output dimension for each position
+    pos: a list of positions to be encoded: size (M,)
+    out: (M, D)
     """
-    grid_h = np.arange(grid_size, dtype=float)
-    grid_w = np.arange(grid_size, dtype=float)
-    grid = np.meshgrid(grid_w, grid_h)  # here w goes first
-    grid = np.stack(grid, axis=0)
+    assert embed_dim % 2 == 0
+    omega = np.arange(embed_dim // 2, dtype=float)
+    omega /= embed_dim / 2.0
+    omega = 1.0 / 10000**omega  # (D/2,)
 
-    grid = grid.reshape([2, 1, grid_size, grid_size])
-    pos_embed = get_2d_sincos_pos_embed_from_grid(embed_dim, grid)
-    if cls_token:
-        pos_embed = np.concatenate([np.zeros([1, embed_dim]), pos_embed], axis=0)
-    return pos_embed
+    pos = pos.reshape(-1)  # (M,)
+    out = np.einsum("m,d->md", pos, omega)  # (M, D/2), outer product
+
+    emb_sin = np.sin(out)  # (M, D/2)
+    emb_cos = np.cos(out)  # (M, D/2)
+
+    emb = np.concatenate([emb_sin, emb_cos], axis=1)  # (M, D)
+    return emb
 
 
 class LinearWeightDecay:
@@ -123,4 +128,4 @@ class LinearWeightDecay:
         self.step_count += 1
         new_wd = self.initial_wd + self.linear_increase * self.step_count
         for param_group in self.adamw.param_groups:
-            param_group['weight_decay'] = new_wd
+            param_group["weight_decay"] = new_wd
