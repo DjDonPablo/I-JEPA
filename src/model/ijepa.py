@@ -65,7 +65,6 @@ class ViTPredictor(nn.Module):
 
             num_layers=num_layers,
             num_heads=num_heads,
-            hidden_dim=embed_dim,
             mlp_dim=4 * embed_dim, # mlp_dim is the FIRST hidden layer size inside MLP (convention?)
             dropout=dropout,
             attention_dropout=attention_dropout,
@@ -93,7 +92,7 @@ class IJEPA(nn.Module):
         super().__init__()
         self.nb_mask = nb_mask
         self.context_encoder = ViTEncoder(embed_dim=embed_dim, image_size=image_size, patch_size=patch_size, num_heads=num_heads, num_layers=num_layers)
-        self.predictor = ViTPredictor(embed_dim=embed_dim // 2, image_size=image_size, patch_size=patch_size, num_heads=num_heads, num_layers=num_layers)
+        self.predictor = ViTPredictor(embed_dim=embed_dim, predictor_embed_dim=embed_dim // 2, image_size=image_size, patch_size=patch_size, num_heads=num_heads, num_layers=num_layers)
         self.target_encoder = ViTEncoder(embed_dim=embed_dim, image_size=image_size, patch_size=patch_size, num_heads=num_heads, num_layers=num_layers)
         self.target_encoder.load_state_dict(self.context_encoder.state_dict())
 
@@ -101,11 +100,11 @@ class IJEPA(nn.Module):
 
     def forward(self, x, mask_enc, mask_pred):
         loss = 0
-        x = self.context_encoder(x, mask_enc)
+        x_tmp = self.context_encoder(x, mask_enc)
         targets = self.target_encoder(x)
 
         for i in range(self.nb_mask):
-            v  = self.predictor(x, mask_enc, mask_pred[i])
+            v  = self.predictor(x_tmp, mask_enc, mask_pred[i])
             target = apply_masks(targets, mask_pred[i])
 
             # compare v with the target mask

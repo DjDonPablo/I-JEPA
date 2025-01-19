@@ -345,12 +345,6 @@ class TransformerPrediction(nn.Module):
         #if not isinstance(masks, list):
         #    masks = [masks]
 
-        n = x.shape[0]
-
-        # Expand the class token to the full batch
-        batch_class_token = self.class_token.expand(n, -1, -1)  # TODO useful ???
-        x = torch.cat([batch_class_token, x], dim=1)            # TODO useful ???
-
         self.predictor_embed(x)
         x = self.encoder(x, mask_enc, mask_pred)
 

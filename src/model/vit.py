@@ -171,7 +171,7 @@ class Encoder(nn.Module):
             f"Expected (batch_size, seq_length, hidden_dim) got {input.shape}",
         )
         input = input + self.pos_embedding
-        if mask:
+        if mask is not None:
             apply_masks(input, mask)
 
         return self.ln(self.layers(self.dropout(input)))
@@ -244,9 +244,6 @@ class TransformerEncoder(nn.Module):
 
         seq_length = (image_size // patch_size) ** 2
 
-        # Add a class token
-        self.class_token = nn.Parameter(torch.zeros(1, 1, hidden_dim))
-        seq_length += 1
 
         self.encoder = Encoder(
             seq_length,
@@ -334,19 +331,12 @@ class TransformerEncoder(nn.Module):
 
 
     def forward(self, x: torch.Tensor, mask: Optional[torch.Tensor]):
-        assert mask is not None, 'Cannot run ViT without mask indices'
-
         # TODO: verify utility
         #if not isinstance(masks, list):
         #    masks = [masks]
 
         # Reshape and permute the input tensor
         x = self._process_input(x)
-        n = x.shape[0]
-
-        # Expand the class token to the full batch
-        batch_class_token = self.class_token.expand(n, -1, -1)
-        x = torch.cat([batch_class_token, x], dim=1)
 
         x = self.encoder(x, mask)
 

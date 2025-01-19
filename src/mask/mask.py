@@ -1,7 +1,7 @@
 import torch
 
 
-def apply_masks(x: torch.Tensor, masks: list):
+def apply_masks(x: torch.Tensor, masks: torch.Tensor):
     """
     :param x: tensor of shape [B (batch-size), N (num-patches), D (feature-dim)]
     :param masks: list of tensors containing indices of patches in [N] to keep

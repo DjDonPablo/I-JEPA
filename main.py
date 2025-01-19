@@ -3,19 +3,19 @@ import torch.nn as nn
 import torch.optim as optim
 
 from torch.utils.data import DataLoader, random_split
-from src.model.i_jepa import ViTEncoder, ViTPredictor
 from src.dataset import JEPADataset
 from src.mask.multiblock import MaskCollator as MBMaskCollator
 from torch.optim import lr_scheduler
-
 from src.utils.utils import LinearWeightDecay
+from src.model.ijepa import IJEPA
 
 
 def train(
-    model: ViTEncoder,
+    model: IJEPA,
     loader: DataLoader,
     optimizer: optim.AdamW,
     device: str,
+    momentum_scheduler: tuple
 ):
     model.train()
     train_loss = 0.0
@@ -23,15 +23,19 @@ def train(
 
     for images, masks_enc, masks_pred in loader:
         images = images.to(device)
-        masks_enc = [u.to(device) for u in masks_enc]
-        masks_pred = [u.to(device) for u in masks_pred]
+        masks_enc = masks_enc[0].to(device)
+        masks_pred = masks_pred[0].to(device)
 
-        # TODO : pass through each model
-        loss = model(images, masks_enc)
+        loss = model(images, masks_enc, masks_pred)
 
         optimizer.zero_grad()
         loss.backward()
         optimizer.step()
+
+        with torch.no_grad():
+            m = next(momentum_scheduler)
+            for param_q, param_k in zip(model.context_encoder.parameters(), model.target_encoder.parameters()):
+                param_k.data.mul_(m).add_((1.-m) * param_q.detach().data)
 
         train_loss += loss.item()
         train_samples += len(images)
@@ -40,7 +44,7 @@ def train(
 
 
 def evaluate(
-    model: ViTEncoder,
+    model: IJEPA,
     loader: DataLoader,
     optimizer: optim.AdamW,
     criterion: nn.MSELoss,
@@ -88,7 +92,7 @@ if __name__ == "__main__":
     learning_rate = 1e-4
 
     in_channels = 3
-    embed_dim = 192  # vit_tiny
+    embed_dim = 384  # vit_tiny
     num_heads = 6
     num_layers = 6
     num_classes = (
@@ -126,22 +130,20 @@ if __name__ == "__main__":
         test_dataset, batch_size=batch_size, collate_fn=mask_collator, shuffle=True
     )
     val_loader = DataLoader(
-        test_dataset, batch_size=batch_size, collate_fn=mask_collator, shuffle=True
+        val_dataset, batch_size=batch_size, collate_fn=mask_collator, shuffle=True
     )
 
     #
     # model
     #
     print("Loading models...")
-    madame_zaza = ViTEncoder()
-    madame_zizi = ViTPredictor()
-    madame_zozo = ViTEncoder()
+    model = IJEPA(nb_mask=num_target_patch, image_size=image_size, patch_size=patch_size, embed_dim=embed_dim, num_heads=num_heads, num_layers=num_layers).to(device)
+    # print(sum(p.numel() for p in model.parameters() if p.requires_grad))
 
-    # ==== CONTEXT ENCODER ====
+    #
     # optimizer, scheduler, loss
     #
-    criterion = nn.MSELoss(reduce="sum")
-    optimizer = optim.AdamW(madame_zaza.parameters(), lr=learning_rate, weight_decay=0.04)
+    optimizer = optim.AdamW(model.parameters(), lr=learning_rate, weight_decay=0.04)
 
     weight_decay_scheduler = LinearWeightDecay(adamw=optimizer, initial_wd=0.04, end_wd=0.4, num_steps=epochs)
 
@@ -157,9 +159,16 @@ if __name__ == "__main__":
     # loop
     #
     best_val_loss = 10e6
+
+    # Exponential moving average
+    ema = (0.996, 1.0)
+    ipe = len(train_loader)
+    momentum_scheduler = (ema[0] + i * (ema[1]-ema[0]) / (ipe * epochs)
+                          for i in range(int(ipe * epochs) + 1))
+
     for epoch in range(epochs):
-        train_loss, train_samples = train(criterion=criterion, device=device, loader=test_loader, model=terminator, optimizer=optimizer)
-        val_loss, val_samples = eval(criterion=criterion, device=device, loader=test_loader, model=terminator, optimizer=optimizer)
+        train_loss, train_samples = train(device=device, loader=train_loader, model=model, optimizer=optimizer, momentum_scheduler=momentum_scheduler)
+        val_loss, val_samples = eval(device=device, loader=test_loader, model=model, optimizer=optimizer)
 
         print(
             f"Epoch [{epoch + 1}/{epoch}] - train loss: {train_loss / train_samples:4f.}, val loss: {val_loss / val_samples:4f.}, lr: {scheduler.get_last_lr()[0]}"
@@ -168,9 +177,9 @@ if __name__ == "__main__":
             best_val_loss = val_loss / val_samples
             checkpoint = {
                 "epoch": epoch,
-                "model": terminator.state_dict(),
+                "model": model.state_dict(),
                 "optimizer": optimizer.state_dict(),
-                "lr_sched": scheduler.get_last_lr()[0],
+                "lr_sched": scheduler.state_dict(),
             }
             torch.save(checkpoint, "checkpoint.pth")
 
