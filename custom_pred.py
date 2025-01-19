@@ -168,7 +168,6 @@ class Encoder(nn.Module):
 
         # -- Batch size --
         B = input.shape[0]
-
         x_pos_embs = self.pos_embedding.repeat(B, 1, 1)
         if mask_enc is not None:
 
@@ -184,15 +183,15 @@ class Encoder(nn.Module):
 
         pos_embs = self.pos_embedding.repeat(B, 1, 1)
         if mask_pred is not None:
-            pos_embs = apply_masks(pos_embs, mask_pred) # TODO modify when mask pred fixed
+            pos_embs = apply_masks(pos_embs, mask_pred)
 
+        # pos_embs = repeat_interleave_batch(pos_embs, B, repeat=1) # TODO check utility
 
-        pos_embs = repeat_interleave_batch(pos_embs, B, repeat=len(mask_enc))
         # trunc_normal_ ?
         pred_tokens = self.mask_token.repeat(pos_embs.size(0), pos_embs.size(1), 1)
-
         pred_tokens += pos_embs
-        input = input.repeat(len(mask_pred), 1, 1) # TODO modifiy when mask pred fixed
+
+        # input = input.repeat(B, 1, 1) # TODO check utility
         input = torch.cat([input, pred_tokens], dim=1)
 
         return self.ln(self.layers(self.dropout(input)))
