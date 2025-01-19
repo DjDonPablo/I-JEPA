@@ -24,7 +24,7 @@ def train(
     for images, masks_enc, masks_pred in loader:
         images = images.to(device)
         masks_enc = masks_enc[0].to(device)
-        masks_pred = masks_pred[0].to(device)
+        masks_pred = [mask.to(device) for mask in masks_pred]
 
         loss = model(images, masks_enc, masks_pred)
 
@@ -87,7 +87,7 @@ if __name__ == "__main__":
     num_context_patch = 1
     num_target_patch = 4
 
-    batch_size = 64
+    batch_size = 8
     epochs = 10
     learning_rate = 1e-4
 

@@ -106,6 +106,7 @@ class IJEPA(nn.Module):
         for i in range(self.nb_mask):
             print("CHECKPOINT IN ##################")
             v  = self.predictor(x_tmp, mask_enc, mask_pred[i])
+            print("v", v.shape)
             print("CHECKPOINT OUT ##################")
             target = apply_masks(targets, mask_pred[i])
 

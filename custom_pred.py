@@ -165,13 +165,13 @@ class Encoder(nn.Module):
 
     def forward(self, input: torch.Tensor, mask_enc: torch.Tensor, mask_pred: torch.Tensor):
         torch._assert(input.dim() == 3, f"Expected (batch_size, seq_length, hidden_dim) got {input.shape}")
-        
+
         # -- Batch size --
         B = input.shape[0]
-        
+
         x_pos_embs = self.pos_embedding.repeat(B, 1, 1)
         if mask_enc is not None:
-            
+
             # ERROR HERE, here are few samples
             # RuntimeError: The size of tensor a (64) must match the size of tensor b (12) at non-singleton dimension 1
             # RuntimeError: The size of tensor a (64) must match the size of tensor b (13) at non-singleton dimension 1
@@ -184,7 +184,7 @@ class Encoder(nn.Module):
 
         pos_embs = self.pos_embedding.repeat(B, 1, 1)
         if mask_pred is not None:
-            pos_embs = apply_masks(pos_embs, mask_enc) # TODO modify when mask pred fixed
+            pos_embs = apply_masks(pos_embs, mask_pred) # TODO modify when mask pred fixed
 
 
         pos_embs = repeat_interleave_batch(pos_embs, B, repeat=len(mask_enc))
@@ -192,7 +192,7 @@ class Encoder(nn.Module):
         pred_tokens = self.mask_token.repeat(pos_embs.size(0), pos_embs.size(1), 1)
 
         pred_tokens += pos_embs
-        input = input.repeat(len(mask_enc), 1, 1) # TODO modifiy when mask pred fixed
+        input = input.repeat(len(mask_pred), 1, 1) # TODO modifiy when mask pred fixed
         input = torch.cat([input, pred_tokens], dim=1)
 
         return self.ln(self.layers(self.dropout(input)))
@@ -358,17 +358,17 @@ class TransformerPrediction(nn.Module):
 
         print("EMBED ----------------------")
         x = self.predictor_embed(x)
-
+        _, N_ctxt, _ = x.shape
         print("ENCODING ====================")
         x = self.encoder(x, mask_enc, mask_pred)
 
         # x = self.heads(x)
         print("SHAPE + SIZE CHANGE ^^^^^^^^^^^^^^^^^^^")
-        _, N_ctxt, _ = x.shape
+
         x = x[:, N_ctxt:]
 
         print("INV PROJ MMMMMMMMMMMMMMMMMMMMMM")
-        self.predictor_proj(x)
+        x = self.predictor_proj(x)
 
         return x
 
