@@ -1,27 +1,31 @@
+import numpy as np
 import torch
 import torch.nn as nn
 import torch.optim as optim
+from torch.optim.lr_scheduler import LambdaLR
 
 from torch.utils.data import DataLoader, random_split
 from src.dataset import JEPADataset
 from src.mask.multiblock import MaskCollator as MBMaskCollator
-from torch.optim import lr_scheduler
+# from torch.optim import lr_scheduler
 from src.utils.utils import LinearWeightDecay
 from src.model.ijepa import IJEPA
+
+from tqdm import tqdm
 
 
 def train(
     model: IJEPA,
     loader: DataLoader,
     optimizer: optim.AdamW,
-    device: str,
-    momentum_scheduler: tuple
+    device,
+    momentum_scheduler
 ):
     model.train()
     train_loss = 0.0
     train_samples = 0
 
-    for images, masks_enc, masks_pred in loader:
+    for images, masks_enc, masks_pred in tqdm(loader):
         images = images.to(device)
         masks_enc = masks_enc[0].to(device)
         masks_pred = [mask.to(device) for mask in masks_pred]
@@ -66,6 +70,21 @@ def evaluate(
     return val_loss, val_samples
 
 
+def lr_scheduler(optimizer, warmup_epochs, total_epochs, initial_lr, peak_lr, final_lr):
+    def lr_lambda(epoch):
+        if epoch == 0:
+            return 1.0
+        if epoch < warmup_epochs:
+            # Augmentation linéaire du LR pendant la période de warm-up
+            return initial_lr + (peak_lr - initial_lr) * (epoch / warmup_epochs)
+        else:
+            # Décroissance cosinus après le warm-up
+            progress = (epoch - warmup_epochs) / (total_epochs - warmup_epochs)
+            return final_lr + (peak_lr - final_lr) * 0.5 * (1 + np.cos(np.pi * progress))
+
+    return LambdaLR(optimizer, lr_lambda)
+
+
 if __name__ == "__main__":
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     # hyper parameters
@@ -80,12 +99,12 @@ if __name__ == "__main__":
     num_context_patch = 1
     num_target_patch = 4
 
-    batch_size = 8
-    epochs = 10
+    batch_size = 32
+    epochs = 100
     learning_rate = 1e-4
 
     in_channels = 3
-    embed_dim = 384  # vit_tiny
+    embed_dim = 384  # vit_small
     num_heads = 6
     num_layers = 6
     num_classes = (
@@ -140,13 +159,15 @@ if __name__ == "__main__":
 
     weight_decay_scheduler = LinearWeightDecay(adamw=optimizer, initial_wd=0.04, end_wd=0.4, num_steps=epochs)
 
-    scheduler1 = lr_scheduler.MultiplicativeLR(
-        optimizer, lr_lambda=lambda x: x * 1.16585
+    """scheduler1 = lr_scheduler.MultiplicativeLR(
+        optimizer, lr_lambda=lambda x: 1.16585
     )
-    scheduler2 = lr_scheduler.CosineAnnealingLR(optimizer, eta_min=1e-6, T_max=10000)
+    scheduler2 = lr_scheduler.CosineAnnealingLR(optimizer, eta_min=1e-5, T_max=10000)
     scheduler = lr_scheduler.SequentialLR(
-        optimizer, schedulers=[scheduler1, scheduler2], milestones=[15]
-    )
+        optimizer, schedulers=[scheduler1, scheduler2], milestones=[10]
+    )"""
+
+    scheduler = lr_scheduler(optimizer, 15, epochs, 1.0, 10.0, 0.01)
 
     #
     # loop
