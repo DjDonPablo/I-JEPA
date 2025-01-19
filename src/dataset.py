@@ -35,4 +35,4 @@ class JEPADataset(Dataset):
 
         target = torch.zeros(self.nb_classes)
         target[label] = 1.0
-        return img  # , target
+        return img#, target
