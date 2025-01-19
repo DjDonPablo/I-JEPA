@@ -5,7 +5,7 @@ import torch.optim as optim
 
 from torch.optim.lr_scheduler import LambdaLR
 from torch.utils.data import DataLoader, random_split
-from src.dataset import JEPADataset
+from src.new_dataset import STL10DatasetUnlabelled
 from src.mask.multiblock import MaskCollator as MBMaskCollator
 from src.utils.utils import LinearWeightDecay
 from src.model.ijepa import IJEPA
@@ -94,8 +94,10 @@ def lr_scheduler(optimizer, warmup_epochs, total_epochs, initial_lr, peak_lr, fi
 
 
 if __name__ == "__main__":
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    #
     # hyper parameters
+    #
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     image_size = 96
     input_size = (image_size, image_size)
@@ -112,17 +114,13 @@ if __name__ == "__main__":
     learning_rate = 1e-4
 
     in_channels = 3
-    embed_dim = 384  # vit_small
-    num_heads = 6
-    num_layers = 6
-    num_classes = (
-        0  # Let this param to 0, (it will keep the size of the generated embeddings)
-    )
+    embed_dim = 384
+    num_heads = 8
+    num_layers = 8
 
     #
     # dataset, dataloader
     #
-
     mask_collator = MBMaskCollator(
         input_size=input_size,
         patch_size=patch_size,
@@ -135,21 +133,15 @@ if __name__ == "__main__":
         min_keep=4,
     )
 
-    dataset = JEPADataset(
-        dataset_path="dataset/archive",  # TODO : adapt to your path
-        labels_filename="labels.csv",
+    dataset = STL10DatasetUnlabelled(
+        path_images="dataset/archive",  # TODO : adapt to your path
     )
 
     generator = torch.Generator().manual_seed(42)
-    train_dataset, test_dataset, val_dataset = random_split(
-        dataset, [0.8, 0.1, 0.1], generator=generator
-    )
+    train_dataset, val_dataset = random_split(dataset, [0.8, 0.2], generator=generator)
 
     train_loader = DataLoader(
         train_dataset, batch_size=batch_size, collate_fn=mask_collator, shuffle=True
-    )
-    test_loader = DataLoader(
-        test_dataset, batch_size=batch_size, collate_fn=mask_collator, shuffle=True
     )
     val_loader = DataLoader(
         val_dataset, batch_size=batch_size, collate_fn=mask_collator, shuffle=True
@@ -158,7 +150,6 @@ if __name__ == "__main__":
     #
     # model
     #
-    print("Loading models...")
     model = IJEPA(
         nb_mask=num_target_patch,
         image_size=image_size,
@@ -167,7 +158,7 @@ if __name__ == "__main__":
         num_heads=num_heads,
         num_layers=num_layers,
     ).to(device)
-    # print(sum(p.numel() for p in model.parameters() if p.requires_grad))
+    print("Number of parameters :", sum(p.numel() for p in model.parameters()))
 
     #
     # optimizer, scheduler, loss
@@ -205,11 +196,11 @@ if __name__ == "__main__":
             criterion=criterion,
         )
         val_loss, val_samples = evaluate(
-            model=model, loader=test_loader, device=device, criterion=criterion
+            model=model, loader=val_loader, device=device, criterion=criterion
         )
 
         print(
-            f"Epoch [{epoch + 1}/{epochs}] - train loss: {train_loss / train_samples}, val loss: {val_loss / val_samples}, lr: {scheduler.get_last_lr()[0]}"
+            f"Epoch [{epoch + 1}/{epochs}] - train loss: {train_loss / train_samples}, val loss: {val_loss / val_samples}, lr: {scheduler.get_last_lr()[0]}, wd: {weight_decay_scheduler.last_weight_decay}"
         )
         if val_loss / val_samples < best_val_loss:
             best_val_loss = val_loss / val_samples

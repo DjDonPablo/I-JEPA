@@ -123,9 +123,11 @@ class LinearWeightDecay:
         self.num_steps = num_steps
         self.linear_increase = (end_wd - initial_wd) / num_steps
         self.step_count = 0
+        self.last_weight_decay = initial_wd
 
     def step(self):
         self.step_count += 1
         new_wd = self.initial_wd + self.linear_increase * self.step_count
+        self.last_weight_decay = new_wd
         for param_group in self.adamw.param_groups:
             param_group["weight_decay"] = new_wd
