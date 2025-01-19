@@ -172,7 +172,7 @@ class Encoder(nn.Module):
         )
         input = input + self.pos_embedding
         if mask is not None:
-            apply_masks(input, mask)
+            input = apply_masks(input, mask)
 
         return self.ln(self.layers(self.dropout(input)))
 
