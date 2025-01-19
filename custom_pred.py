@@ -355,19 +355,19 @@ class TransformerPrediction(nn.Module):
         #if not isinstance(masks, list):
         #    masks = [masks]
 
-        print("EMBED ----------------------")
+        # print("EMBED ----------------------")
         x = self.predictor_embed(x)
 
         _, N_ctxt, _ = x.shape # TODO:??????
-        print("ENCODING ====================")
+        # print("ENCODING ====================")
         x = self.encoder(x, mask_enc, mask_pred)
 
         # x = self.heads(x)
-        print("SHAPE + SIZE CHANGE ^^^^^^^^^^^^^^^^^^^")
+        # print("SHAPE + SIZE CHANGE ^^^^^^^^^^^^^^^^^^^")
 
         x = x[:, N_ctxt:]
 
-        print("INV PROJ MMMMMMMMMMMMMMMMMMMMMM")
+        # print("INV PROJ MMMMMMMMMMMMMMMMMMMMMM")
         x = self.predictor_proj(x)
 
         return x
