@@ -22,7 +22,7 @@ class LinearProbe(nn.Module):
             num_layers=6
         )
 
-        checkpoint = torch.load('checkpoint.pth')
+        checkpoint = torch.load('checkpoint_26.pth')
         self.ijepa.load_state_dict(checkpoint["model"]) # TODO: load state_dict
         for parameters in self.ijepa.parameters():
             parameters.requires_grad = False
