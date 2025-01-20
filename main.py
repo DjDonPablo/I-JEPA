@@ -111,14 +111,14 @@ if __name__ == "__main__":
     num_context_patch = 1
     num_target_patch = 4
 
-    batch_size = 256
+    batch_size = 128
     epochs = 100
     learning_rate = 1e-4
 
     in_channels = 3
     embed_dim = 128
-    num_heads = 4
-    num_layers = 6
+    num_heads = 6
+    num_layers = 5
 
     #
     # dataset, dataloader
@@ -180,10 +180,10 @@ if __name__ == "__main__":
     linear_criterion = nn.CrossEntropyLoss(reduction="sum")
 
     weight_decay_scheduler = LinearWeightDecay(
-        adamw=optimizer, initial_wd=0.04, end_wd=0.4, num_steps=epochs
+        adamw=optimizer, initial_wd=0.04, end_wd=0.2, num_steps=epochs
     )
 
-    scheduler = lr_scheduler(optimizer, 20, epochs, 1.0, 10.0, 0.1)
+    scheduler = lr_scheduler(optimizer, 20, epochs, 1.0, 5.0, 0.01)
 
     #
     # loop
