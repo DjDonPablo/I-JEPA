@@ -117,8 +117,8 @@ if __name__ == "__main__":
 
     in_channels = 3
     embed_dim = 128
-    num_heads = 6
-    num_layers = 5
+    num_heads = 8
+    num_layers = 4
 
     #
     # dataset, dataloader
