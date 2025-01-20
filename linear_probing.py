@@ -1,93 +1,103 @@
 import torch
+import os
 import torch.nn as nn
 import torch.optim as optim
-from torch.utils.data import DataLoader, random_split
-from src.dataset import JEPADataset
 
-from src.model.ijepa import IJEPA
+from torch.utils.data import DataLoader
+from torchvision.models import VisionTransformer
+from src.new_dataset import CIFAR10Dataset
 from tqdm import tqdm
 
 
 class LinearProbe(nn.Module):
-    def __init__(self, num_classes, embedding_dim, ijepa: IJEPA):
+    def __init__(self, num_classes):
         super().__init__()
-        self.linear = nn.Linear(embedding_dim, num_classes)
-        self.ijepa = ijepa
-        self.ijepa.evaluation_on = True
-
-        # checkpoint = torch.load("checkpoint.pth")
-        # self.ijepa.load_state_dict(checkpoint["model"])  # TODO: load state_dict
+        self.vit = VisionTransformer(
+            image_size=32,
+            patch_size=4,
+            num_layers=6,
+            num_heads=4,
+            hidden_dim=128,
+            mlp_dim=128 * 4,
+            num_classes=num_classes,
+        )
 
     def forward(self, x):
-        with torch.no_grad():
-            x = self.ijepa(x)  # B, N, D
-        x = x.mean(dim=1)  # B, D
-        x = self.linear(x)  # B, 8
+        x = self.vit(x)
         return x
 
 
-def train_linear_probing(loader, device):
-    # linear evaluation training
-    model = LinearProbe(8).to(device)
+def train_linear_probing(train_loader, device, val_loader):
+    model = LinearProbe(10).to(device)
     criterion = nn.CrossEntropyLoss(reduction="sum")
     optimizer = optim.Adam(model.parameters(), lr=3e-4)
 
+    model.train()
     train_loss = 0
     train_samples = 0
     train_correct = 0
-    for img, label in loader:
+    for img, label in tqdm(train_loader):
         img = img.to(device)
         label = label.to(device)
 
         optimizer.zero_grad()
 
-        # infer linear probe
         prediction = model(img)
-        label = label.argmax(dim=1)
         loss = criterion(prediction, label)
 
         loss.backward()
         optimizer.step()
 
         pred = prediction.argmax(dim=1)
-        train_correct += (pred == label).sum().item()
+        train_correct += (pred == label.argmax(dim=1)).sum().item()
 
         train_loss += loss.item()
         train_samples += len(img)
 
-    accuracy = train_correct / train_samples
-    return accuracy, train_loss, train_samples
+    model.eval()
+    eval_loss = 0
+    eval_samples = 0
+    eval_accuracy = 0
+    for data, label in val_loader:
+        data, label = data.to(device), label.to(device)
+
+        preds = model(data)
+        loss = criterion(preds, label)
+
+        pred = preds.argmax(dim=1)
+        eval_accuracy += (pred == label.argmax(dim=1)).sum().item()
+
+        eval_loss += loss.item()
+        eval_samples += len(data)
+
+    train_accuracy = train_correct / train_samples
+    eval_accuracy /= eval_samples
+    return (
+        train_loss / train_samples,
+        train_accuracy,
+        eval_loss / eval_samples,
+        eval_accuracy,
+    )
 
 
 if __name__ == "__main__":
-    # Training Hyp. Param.
-    epochs = 30
-    batch_size = 32
+    epochs = 100
+    batch_size = 128
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    dataset = JEPADataset(
-        dataset_path="src/dataset",  # TODO : adapt to your path
-        labels_filename="labels.csv",
-    )
+    data_path = os.path.join("..", "cifar-10")
+    train_dataset = CIFAR10Dataset(data_path, "supervised", "train")
+    test_dataset = CIFAR10Dataset(data_path, "supervised", "test")
 
-    generator = torch.Generator().manual_seed(42)
-    train_dataset, test_dataset, val_dataset = random_split(
-        dataset, [0.8, 0.1, 0.1], generator=generator
-    )
-
-    val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=True)
-    test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=True)
+    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
+    val_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=True)
 
     for epoch in range(epochs):
-        accuracy, train_loss, train_samples = train_linear_probing(
-            test_loader, device=device
+        train_loss, train_acc, val_loss, val_acc = train_linear_probing(
+            train_loader=train_loader, device=device, val_loader=val_loader
         )
 
         print(
-            f"Epoch {epoch + 1}/{epochs} |",
-            "train_acc:",
-            accuracy,
-            "train_loss:",
-            (train_loss / train_samples),
+            f"Epoch [{epoch + 1}/{epochs}], train_loss : {train_loss}, train_acc : {train_acc}, val_loss : {val_loss}, val_acc : {val_acc}"
         )

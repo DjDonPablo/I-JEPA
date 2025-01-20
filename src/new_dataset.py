@@ -21,19 +21,12 @@ class CIFAR10Dataset(
 
         self.nb_classes = len(self.le.classes_)
 
-        self.data_path = os.path.join(dataset_path, "train")
+        self.data_path = os.path.join(dataset_path, "train", "train")
 
-        self.mode = mode
-        if self.mode == "unsupervised":
-            if split == "train":
-                self.df = self.df[:40000]
-            else:
-                self.df = self.df[40000:45000]
+        if split == "train":
+            self.df = self.df[:45000]
         else:
-            if split == "train":
-                self.df = self.df[45000:49500]
-            else:
-                self.df = self.df[49500:]
+            self.df = self.df[45000:]
 
     def __len__(self):
         """
@@ -44,9 +37,6 @@ class CIFAR10Dataset(
     def __getitem__(self, idx):
         img_path = os.path.join(self.data_path, str(self.df.iloc[idx]["id"]) + ".png")
         img = pil_to_tensor(Image.open(img_path)).float() / 255
-
-        if self.mode == "unsupervised":
-            return img
 
         label = self.df.iloc[idx]["label_encoded"]
         target = torch.zeros(self.nb_classes)
