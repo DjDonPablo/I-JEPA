@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import DataLoader, random_split
-from src.dataset import JEPADataset
+from src.new_dataset import STL10DatasetLabelled
 
 from src.model.ijepa import IJEPA
 from tqdm import tqdm
@@ -13,16 +13,16 @@ class LinearProbe(nn.Module):
         super().__init__()
         self.linear = nn.Linear(384, num_classes)
         self.ijepa = IJEPA(
-            eval=True,
+            evaluation_on=True,
             nb_mask=4,
             image_size=96,
             patch_size=12,
             embed_dim=384,
-            num_heads=6,
-            num_layers=6
+            num_heads=8,
+            num_layers=8
         )
 
-        checkpoint = torch.load('checkpoint.pth')
+        checkpoint = torch.load('checkpoint_new_ds.pth')
         self.ijepa.load_state_dict(checkpoint["model"]) # TODO: load state_dict
         for parameters in self.ijepa.parameters():
             parameters.requires_grad = False
@@ -138,9 +138,9 @@ if __name__ == "__main__":
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    dataset = JEPADataset(
-        dataset_path="src/dataset",  # TODO : adapt to your path
-        labels_filename="labels.csv",
+    dataset = STL10DatasetLabelled(
+        path_images="src/stl10_binary/train_X.bin",  # TODO : adapt to your path
+        path_labels="src/stl10_binary/train_y.bin",
     )
 
     generator = torch.Generator().manual_seed(42)
