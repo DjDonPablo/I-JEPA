@@ -11,17 +11,16 @@ from tqdm import tqdm
 class LinearProbe(nn.Module):
     def __init__(self, num_classes, embedding_dim, ijepa: IJEPA):
         super().__init__()
-        self.linear = nn.Linear(384, num_classes)
+        self.linear = nn.Linear(embedding_dim, num_classes)
         self.ijepa = ijepa
         self.ijepa.evaluation_on = True
 
         # checkpoint = torch.load("checkpoint.pth")
         # self.ijepa.load_state_dict(checkpoint["model"])  # TODO: load state_dict
-        for parameters in self.ijepa.parameters():
-            parameters.requires_grad = False
 
     def forward(self, x):
-        x = self.ijepa(x)  # B, N, D
+        with torch.no_grad():
+            x = self.ijepa(x)  # B, N, D
         x = x.mean(dim=1)  # B, D
         x = self.linear(x)  # B, 8
         return x

@@ -235,13 +235,11 @@ if __name__ == "__main__":
         # ------------------------------- EVAL WITH LINEAR MODEL -----------------------------
 
         if epoch % 10 == 0:
-            tmp_param = model.load_state_dict()
-
             linear_model = LinearProbe(test_dataset.nb_classes, embed_dim, model).to(
                 device
             )
             linear_optimizer = optim.Adam(linear_model.parameters(), 3e-4)
-            linear_epochs = 10
+            linear_epochs = 15
 
             for lepoch in range(1, linear_epochs + 1):
                 linear_model.train()
@@ -256,7 +254,7 @@ if __name__ == "__main__":
                     loss = linear_criterion(preds, label)
 
                     pred = preds.argmax(dim=1)
-                    train_acc += (pred == label).sum().item()
+                    train_acc += (pred == torch.argmax(label, dim=1)).sum().item()
 
                     linear_optimizer.zero_grad()
                     loss.backward()
@@ -276,7 +274,7 @@ if __name__ == "__main__":
                     loss = linear_criterion(preds, label)
 
                     pred = preds.argmax(dim=1)
-                    eval_accuracy += (pred == label).sum().item()
+                    eval_accuracy += (pred == label.argmax(dim=1)).sum().item()
 
                     eval_loss += loss.item()
                     eval_samples += len(data)
@@ -286,4 +284,3 @@ if __name__ == "__main__":
                 )
 
             model.evaluation_on = False
-            model.load_state_dict(tmp_param)
