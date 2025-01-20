@@ -111,7 +111,7 @@ if __name__ == "__main__":
     num_context_patch = 1
     num_target_patch = 4
 
-    batch_size = 32
+    batch_size = 256
     epochs = 100
     learning_rate = 1e-4
 
