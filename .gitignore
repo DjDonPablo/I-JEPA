@@ -3,3 +3,5 @@ __pycache__/
 .idea/
 affectnet/
 dataset
+env
+cifar-10

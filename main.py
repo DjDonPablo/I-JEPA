@@ -1,15 +1,17 @@
 import numpy as np
+import os
 import torch.nn as nn
 import torch
 import torch.optim as optim
 
 from torch.optim.lr_scheduler import LambdaLR
 from torch.utils.data import DataLoader, random_split
-from src.new_dataset import STL10DatasetUnlabelled
+from src.new_dataset import CIFAR10Dataset
 from src.mask.multiblock import MaskCollator as MBMaskCollator
 from src.utils.utils import LinearWeightDecay
 from src.model.ijepa import IJEPA
 from tqdm import tqdm
+from linear_probing import LinearProbe
 
 
 def train(
@@ -99,9 +101,9 @@ if __name__ == "__main__":
     #
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    image_size = 96
+    image_size = 32
     input_size = (image_size, image_size)
-    patch_size = 12
+    patch_size = 4
 
     target_mask_scale = (0.15, 0.2)
     context_mask_scale = (0.85, 1.0)
@@ -114,9 +116,9 @@ if __name__ == "__main__":
     learning_rate = 1e-4
 
     in_channels = 3
-    embed_dim = 384
-    num_heads = 8
-    num_layers = 8
+    embed_dim = 128
+    num_heads = 4
+    num_layers = 6
 
     #
     # dataset, dataloader
@@ -133,18 +135,26 @@ if __name__ == "__main__":
         min_keep=4,
     )
 
-    dataset = STL10DatasetUnlabelled(
-        path_images="dataset/archive",  # TODO : adapt to your path
-    )
-
-    generator = torch.Generator().manual_seed(42)
-    train_dataset, val_dataset = random_split(dataset, [0.8, 0.2], generator=generator)
+    # for i-jepa
+    data_path = os.path.join("..", "cifar-10")
+    train_dataset = CIFAR10Dataset(data_path, "unsupervised", "train")
+    test_dataset = CIFAR10Dataset(data_path, "unsupervised", "test")
 
     train_loader = DataLoader(
         train_dataset, batch_size=batch_size, collate_fn=mask_collator, shuffle=True
     )
     val_loader = DataLoader(
-        val_dataset, batch_size=batch_size, collate_fn=mask_collator, shuffle=True
+        test_dataset, batch_size=batch_size, collate_fn=mask_collator, shuffle=True
+    )
+
+    # for linear model
+    linear_train_dataset = CIFAR10Dataset(data_path, "supervised", "train")
+    linear_test_dataset = CIFAR10Dataset(data_path, "supervised", "test")
+    linear_train_loader = DataLoader(
+        linear_train_dataset, batch_size=batch_size, shuffle=True
+    )
+    linear_val_loader = DataLoader(
+        linear_test_dataset, batch_size=batch_size, shuffle=True
     )
 
     #
@@ -158,6 +168,7 @@ if __name__ == "__main__":
         num_heads=num_heads,
         num_layers=num_layers,
     ).to(device)
+
     print("Number of parameters :", sum(p.numel() for p in model.parameters()))
 
     #
@@ -166,12 +177,13 @@ if __name__ == "__main__":
     optimizer = optim.AdamW(model.parameters(), lr=learning_rate, weight_decay=0.04)
 
     criterion = nn.MSELoss(reduction="sum")
+    linear_criterion = nn.CrossEntropyLoss(reduction="sum")
 
     weight_decay_scheduler = LinearWeightDecay(
         adamw=optimizer, initial_wd=0.04, end_wd=0.4, num_steps=epochs
     )
 
-    scheduler = lr_scheduler(optimizer, 15, epochs, 1.0, 10.0, 0.01)
+    scheduler = lr_scheduler(optimizer, 20, epochs, 1.0, 10.0, 0.1)
 
     #
     # loop
@@ -186,7 +198,8 @@ if __name__ == "__main__":
         for i in range(int(ipe * epochs) + 1)
     )
 
-    for epoch in range(epochs):
+    train_loss_jepa = []
+    for epoch in range(1, epochs + 1):
         train_loss, train_samples = train(
             device=device,
             loader=train_loader,
@@ -200,8 +213,12 @@ if __name__ == "__main__":
         )
 
         print(
-            f"Epoch [{epoch + 1}/{epochs}] - train loss: {train_loss / train_samples}, val loss: {val_loss / val_samples}, lr: {scheduler.get_last_lr()[0]}, wd: {weight_decay_scheduler.last_weight_decay}"
+            f"Epoch [{epoch}/{epochs}] - train loss: {train_loss / train_samples}, val loss: {val_loss / val_samples}, lr: {scheduler.get_last_lr()[0]}, wd: {weight_decay_scheduler.last_weight_decay}"
         )
+
+        train_loss_jepa.append(train_loss / train_samples)
+        print(train_loss_jepa)
+
         if val_loss / val_samples < best_val_loss:
             best_val_loss = val_loss / val_samples
             checkpoint = {
@@ -214,3 +231,57 @@ if __name__ == "__main__":
 
         scheduler.step()
         weight_decay_scheduler.step()
+
+        # ------------------------------- EVAL WITH LINEAR MODEL -----------------------------
+
+        if epoch % 10 == 0:
+            tmp_param = model.load_state_dict()
+
+            linear_model = LinearProbe(test_dataset.nb_classes, embed_dim, model)
+            linear_optimizer = optim.Adam(linear_model.parameters(), 3e-4)
+            linear_epochs = 10
+
+            for lepoch in range(1, linear_epochs + 1):
+                linear_model.train()
+                train_loss = 0
+                train_samples = 0
+                train_acc = 0
+                for data, label in linear_train_loader:
+                    data, label = data.to(device), label.to(device)
+
+                    preds = linear_model(data)
+
+                    loss = linear_criterion(preds, label)
+
+                    pred = preds.argmax(dim=1)
+                    train_acc += (pred == label).sum().item()
+
+                    linear_optimizer.zero_grad()
+                    loss.backward()
+                    linear_optimizer.step()
+
+                    train_loss += loss.item()
+                    train_samples += len(data)
+
+                linear_model.eval()
+                eval_loss = 0
+                eval_samples = 0
+                eval_accuracy = 0
+                for data, label in linear_val_loader:
+                    data, label = data.to(device), label.to(device)
+
+                    preds = linear_model(data)
+                    loss = linear_criterion(preds, label)
+
+                    pred = preds.argmax(dim=1)
+                    eval_accuracy += (pred == label).sum().item()
+
+                    eval_loss += loss.item()
+                    eval_samples += len(data)
+
+                print(
+                    f"[LINEAR] Epoch [{lepoch}/{linear_epochs}] | train_acc: {train_acc / train_samples}, train_loss: {train_loss / train_samples} | val_acc: {eval_accuracy / eval_samples}, val_loss: {eval_loss / eval_samples}"
+                )
+
+            model.evaluation_on = False
+            model.load_state_dict(tmp_param)

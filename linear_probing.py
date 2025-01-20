@@ -9,28 +9,21 @@ from tqdm import tqdm
 
 
 class LinearProbe(nn.Module):
-    def __init__(self, num_classes):
+    def __init__(self, num_classes, embedding_dim, ijepa: IJEPA):
         super().__init__()
         self.linear = nn.Linear(384, num_classes)
-        self.ijepa = IJEPA(
-            eval=True,
-            nb_mask=4,
-            image_size=96,
-            patch_size=12,
-            embed_dim=384,
-            num_heads=6,
-            num_layers=6
-        )
+        self.ijepa = ijepa
+        self.ijepa.evaluation_on = True
 
-        checkpoint = torch.load('checkpoint.pth')
-        self.ijepa.load_state_dict(checkpoint["model"]) # TODO: load state_dict
+        # checkpoint = torch.load("checkpoint.pth")
+        # self.ijepa.load_state_dict(checkpoint["model"])  # TODO: load state_dict
         for parameters in self.ijepa.parameters():
             parameters.requires_grad = False
 
     def forward(self, x):
-        x = self.ijepa(x) # B, N, D
-        x = x.mean(dim=1) # B, D
-        x = self.linear(x) # B, 8
+        x = self.ijepa(x)  # B, N, D
+        x = x.mean(dim=1)  # B, D
+        x = self.linear(x)  # B, 8
         return x
 
 
@@ -66,6 +59,7 @@ def train_linear_probing(loader, device):
     accuracy = train_correct / train_samples
     return accuracy, train_loss, train_samples
 
+
 if __name__ == "__main__":
     # Training Hyp. Param.
     epochs = 30
@@ -79,19 +73,22 @@ if __name__ == "__main__":
     )
 
     generator = torch.Generator().manual_seed(42)
-    train_dataset, test_dataset, val_dataset = random_split(dataset, [0.8, 0.1, 0.1], generator=generator)
-
-
-    val_loader = DataLoader(
-        val_dataset, batch_size=batch_size, shuffle=True
+    train_dataset, test_dataset, val_dataset = random_split(
+        dataset, [0.8, 0.1, 0.1], generator=generator
     )
-    test_loader = DataLoader(
-        test_dataset, batch_size=batch_size, shuffle=True
-    )
+
+    val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=True)
+    test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=True)
 
     for epoch in range(epochs):
         accuracy, train_loss, train_samples = train_linear_probing(
             test_loader, device=device
         )
 
-        print(f"Epoch {epoch + 1}/{epochs} |", "train_acc:", accuracy, "train_loss:", (train_loss / train_samples))
+        print(
+            f"Epoch {epoch + 1}/{epochs} |",
+            "train_acc:",
+            accuracy,
+            "train_loss:",
+            (train_loss / train_samples),
+        )
