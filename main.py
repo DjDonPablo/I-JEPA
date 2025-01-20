@@ -136,7 +136,7 @@ if __name__ == "__main__":
     )
 
     # for i-jepa
-    data_path = os.path.join("..", "cifar-10")
+    data_path = "/kaggle/working/"  # os.path.join("..", "cifar-10")
     train_dataset = CIFAR10Dataset(data_path, "unsupervised", "train")
     test_dataset = CIFAR10Dataset(data_path, "unsupervised", "test")
 
@@ -237,7 +237,9 @@ if __name__ == "__main__":
         if epoch % 10 == 0:
             tmp_param = model.load_state_dict()
 
-            linear_model = LinearProbe(test_dataset.nb_classes, embed_dim, model)
+            linear_model = LinearProbe(test_dataset.nb_classes, embed_dim, model).to(
+                device
+            )
             linear_optimizer = optim.Adam(linear_model.parameters(), 3e-4)
             linear_epochs = 10
 
