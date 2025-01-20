@@ -2,7 +2,7 @@ import numpy as np
 import torch.nn as nn
 import torch
 import torch.optim as optim
-
+import torch.nn.functional as F
 from torch.optim.lr_scheduler import LambdaLR
 from torch.utils.data import DataLoader, random_split
 from src.dataset import JEPADataset
@@ -107,14 +107,14 @@ if __name__ == "__main__":
     num_context_patch = 1
     num_target_patch = 4
 
-    batch_size = 32
-    epochs = 100
+    batch_size = 128
+    epochs = 300
     learning_rate = 1e-4
 
     in_channels = 3
     embed_dim = 384  # vit_small
-    num_heads = 6
-    num_layers = 6
+    num_heads = 12
+    num_layers = 12
     num_classes = (
         0  # Let this param to 0, (it will keep the size of the generated embeddings)
     )
@@ -136,7 +136,7 @@ if __name__ == "__main__":
     )
 
     dataset = JEPADataset(
-        dataset_path="dataset/archive",  # TODO : adapt to your path
+        dataset_path="src/dataset",  # TODO : adapt to your path
         labels_filename="labels.csv",
     )
 
@@ -174,13 +174,13 @@ if __name__ == "__main__":
     #
     optimizer = optim.AdamW(model.parameters(), lr=learning_rate, weight_decay=0.04)
 
-    criterion = nn.MSELoss(reduction="sum")
+    criterion = F.smooth_l1_loss
 
     weight_decay_scheduler = LinearWeightDecay(
         adamw=optimizer, initial_wd=0.04, end_wd=0.4, num_steps=epochs
     )
 
-    scheduler = lr_scheduler(optimizer, 15, epochs, 1.0, 10.0, 0.01)
+    scheduler = lr_scheduler(optimizer, 40, epochs, 1.0, 10.0, 0.01)
 
     #
     # loop

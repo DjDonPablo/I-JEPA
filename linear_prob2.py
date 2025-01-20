@@ -13,7 +13,7 @@ class LinearProbe(nn.Module):
         super().__init__()
         self.linear = nn.Linear(384, num_classes)
         self.ijepa = IJEPA(
-            eval=True,
+            evaluation_on=True,
             nb_mask=4,
             image_size=96,
             patch_size=12,
