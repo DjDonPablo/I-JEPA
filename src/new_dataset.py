@@ -21,7 +21,7 @@ class CIFAR10Dataset(
 
         self.nb_classes = len(self.le.classes_)
 
-        self.data_path = os.path.join(dataset_path, "train", "train")
+        self.data_path = os.path.join(dataset_path, "train")
 
         self.mode = mode
         if self.mode == "unsupervised":
