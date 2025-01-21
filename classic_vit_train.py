@@ -9,7 +9,7 @@ from src.new_dataset import CIFAR10Dataset
 from tqdm import tqdm
 
 
-class LinearProbe(nn.Module):
+class ClassicViT(nn.Module):
     def __init__(self, num_classes):
         super().__init__()
         self.vit = VisionTransformer(
@@ -28,7 +28,7 @@ class LinearProbe(nn.Module):
 
 
 def train_linear_probing(train_loader, device, val_loader):
-    model = LinearProbe(10).to(device)
+    model = ClassicViT(10).to(device)
     criterion = nn.CrossEntropyLoss(reduction="sum")
     optimizer = optim.Adam(model.parameters(), lr=3e-4)
 
@@ -86,7 +86,7 @@ if __name__ == "__main__":
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    data_path = os.path.join("..", "cifar-10")
+    data_path = os.path.join("src", "dataset")
     train_dataset = CIFAR10Dataset(data_path, "supervised", "train")
     test_dataset = CIFAR10Dataset(data_path, "supervised", "test")
 

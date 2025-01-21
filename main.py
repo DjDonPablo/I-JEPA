@@ -11,7 +11,30 @@ from src.mask.multiblock import MaskCollator as MBMaskCollator
 from src.utils.utils import LinearWeightDecay
 from src.model.ijepa import IJEPA
 from tqdm import tqdm
-from linear_probing import LinearProbe
+
+import logging
+
+logging.basicConfig(
+    filename="training_logs.txt",
+    filemode="a",
+    format="%(asctime)s - %(levelname)s - %(message)s",
+    level=logging.INFO,
+)
+
+logger = logging.getLogger()
+
+class LinearProbe(nn.Module):
+    def __init__(self, num_classes, embedding_dim, ijepa: IJEPA):
+        super().__init__()
+        self.linear = nn.Linear(embedding_dim, num_classes)
+        self.ijepa = ijepa
+        self.ijepa.evaluation_on = True
+
+    def forward(self, x):
+        with torch.no_grad():
+            x = self.ijepa(x)  # B, N, D
+        x = x.mean(dim=1)  # B, D
+        x = self.linear(x)  # B, 8
 
 
 def train(
@@ -136,7 +159,7 @@ if __name__ == "__main__":
     )
 
     # for i-jepa
-    data_path = "/kaggle/working/"  # os.path.join("..", "cifar-10")
+    data_path = os.path.join("src", "dataset")
     train_dataset = CIFAR10Dataset(data_path, "unsupervised", "train")
     test_dataset = CIFAR10Dataset(data_path, "unsupervised", "test")
 
@@ -174,7 +197,7 @@ if __name__ == "__main__":
     #
     # optimizer, scheduler, loss
     #
-    optimizer = optim.AdamW(model.parameters(), lr=learning_rate, weight_decay=0.04)
+    optimizer = optim.AdamW(model.parameters(), lr=learning_rate, weight_decay=0.02)
 
     criterion = nn.MSELoss(reduction="sum")
     linear_criterion = nn.CrossEntropyLoss(reduction="sum")
@@ -238,8 +261,15 @@ if __name__ == "__main__":
             linear_model = LinearProbe(test_dataset.nb_classes, embed_dim, model).to(
                 device
             )
-            linear_optimizer = optim.Adam(linear_model.parameters(), 3e-4)
-            linear_epochs = 15
+
+            linear_epochs = 50
+            linear_optimizer = optim.Adam(linear_model.parameters(), lr=3e-3)
+            linear_scheduler = optim.lr_scheduler.CosineAnnealingLR(
+                linear_optimizer,
+                T_max=linear_epochs,
+                eta_min=1e-4
+            )
+
 
             for lepoch in range(1, linear_epochs + 1):
                 linear_model.train()
@@ -279,8 +309,12 @@ if __name__ == "__main__":
                     eval_loss += loss.item()
                     eval_samples += len(data)
 
-                print(
-                    f"[LINEAR] Epoch [{lepoch}/{linear_epochs}] | train_acc: {train_acc / train_samples}, train_loss: {train_loss / train_samples} | val_acc: {eval_accuracy / eval_samples}, val_loss: {eval_loss / eval_samples}"
+                log_message = (
+                    f"[LINEAR] Epoch [{lepoch}/{linear_epochs}] | "
+                    f"train_acc: {train_acc / train_samples}, train_loss: {train_loss / train_samples} | "
+                    f"val_acc: {eval_accuracy / eval_samples}, val_loss: {eval_loss / eval_samples}"
                 )
+                logger.info(log_message)
+            logger.info("\n----------------\n\n")
 
             model.evaluation_on = False

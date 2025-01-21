@@ -21,7 +21,7 @@ class CIFAR10Dataset(
 
         self.nb_classes = len(self.le.classes_)
 
-        self.data_path = os.path.join(dataset_path, "train", "train")
+        self.data_path = os.path.join(dataset_path, "train")
 
         if split == "train":
             self.df = self.df[:45000]
@@ -41,4 +41,4 @@ class CIFAR10Dataset(
         label = self.df.iloc[idx]["label_encoded"]
         target = torch.zeros(self.nb_classes)
         target[label] = 1.0
-        return img, target
+        return img#, target

@@ -2,9 +2,9 @@ import torch.nn as nn
 import torch
 import torch.nn.functional as F
 
-from src.model.vit import TransformerEncoder
+from src.model.vit_enc import TransformerEncoder
 from src.mask.mask import apply_masks
-from custom_pred import TransformerPrediction
+from src.model.vit_pred import TransformerPrediction
 
 
 class ViTEncoder(nn.Module):

@@ -5,7 +5,6 @@ from collections import OrderedDict
 from functools import partial
 from typing import Callable, Optional
 from torchvision.ops.misc import MLP
-from torchvision.utils import _log_api_usage_once
 from src.mask.mask import apply_masks
 from src.utils.utils import get_2d_sincos_pos_embed
 
